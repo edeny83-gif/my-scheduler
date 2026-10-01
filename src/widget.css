@@ -97,7 +97,7 @@ button { font-family: inherit; }
 .more.merged { display: flex; min-width: 0; font-size: var(--ev-size); }
 .more.merged .mt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .more.merged .mc { flex: 0 0 auto; opacity: .7; white-space: pre; }
-.ev .tm { opacity: .75; margin-right: 3px; font-variant-numeric: tabular-nums; }
+.ev .dot { opacity: .8; margin-right: 4px; font-weight: 700; }
 .ev:hover { text-decoration: underline; text-underline-offset: 2px; }
 .ev.out, .other .ev { opacity: .45; }
 .more { flex: 0 0 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: calc(var(--ev-size) * .9); opacity: .6; pointer-events: auto; cursor: pointer; }

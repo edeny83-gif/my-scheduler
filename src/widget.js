@@ -168,13 +168,11 @@ function render() {
         d.className = 'ev';
         d.dataset.title = e.title;
         d.style.color = colorOf(e);
-        if (!e.allDay) {
-          const tm = document.createElement('span');
-          tm.className = 'tm';
-          tm.textContent = hm(e.start);
-          d.append(tm);
-        }
-        d.append(document.createTextNode(e.title));
+        // 칸 안에서는 시간 없이 "· 제목" (하루 여러 일정을 점으로 구분, 시간은 아래 목록·말풍선에)
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.textContent = '·';
+        d.append(dot, document.createTextNode(e.title));
         d.title = tooltip(e);
         d.onclick = (ev) => { ev.stopPropagation(); selectDay(day); openForm(e); };
         box.append(d);

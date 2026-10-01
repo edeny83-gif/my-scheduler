@@ -5,7 +5,7 @@
   const settings = {
     fontFamily: 'Noto Sans CJK KR', titleSize: 34, dateSize: 13, eventSize: 12,
     colors: { title: '#ffffff', weekday: '#d5dde8', date: '#f4f7fb', sunday: '#ff8f8f', saturday: '#90b8ff', event: '#a8e0ff', list: '#f4f7fb' },
-    bgColor: '#16202c', bgOpacity: 0.35, todayColor: '#ffffff', todayOpacity: 0.16, border: true, showList: true, maxLanes: 3,
+    bgColor: '#16202c', bgOpacity: 0.35, todayColor: '#ffffff', todayOpacity: 0.16, border: true, showList: true, showQuick: true, maxLanes: 3,
     locked: false, pinToDesktop: true, holidays: { enabled: true, observances: false }, google: { enabled: true, color: '#ffd28a' }, calendars: [],
   };
   let events = [
@@ -35,6 +35,20 @@
     updateSettings: async (p) => { Object.assign(settings, p); listeners.settings?.(settings); return settings; },
     resetSettings: async () => settings, openSettings: async () => {}, refreshFeeds: async () => {}, windowAction: async () => {},
     resizeStart() {}, resizeMove() {}, resizeEnd() {},
+    syncStatus: async () => ({ phase: 'online', email: 'teacher@example.com' }),
+    // 빠른 입력: "상담"이 들어가면 내일 15시 일정 하나를 넣는 가짜 AI
+    aiCommand: async ({ text }) => {
+      await new Promise((r) => setTimeout(r, 300));
+      const date = ymd(d(1));
+      const item = { title: '학부모 상담', kind: '일정', date, time: '15:00' };
+      const dup = events.some((e) => e.title === item.title && ymd(e.start) === date);
+      if (dup) return { kind: 'prompt', summary: '', added: [], skipped: [{ item, reason: '이미 있음' }], undated: [] };
+      const id = String(Math.random());
+      events.push({ id, title: item.title, start: d(1, 15), end: d(1, 16), allDay: false, color: '#ffd28a', remind: [30], source: 'ai' });
+      listeners.events?.(events);
+      return { kind: 'prompt', summary: text, added: [{ id, item }], skipped: [], undated: [{ title: '체육대회 준비' }] };
+    },
+    undoItems: async (ids) => { events = events.filter((x) => !ids.includes(x.id)); listeners.events?.(events); },
     on: (ch, cb) => { listeners[ch] = cb; },
   };
 })();

@@ -13,7 +13,7 @@ function fill() {
   $('#bgColor').value = s.bgColor;
   $('#todayColor').value = s.todayColor;
   for (const el of document.querySelectorAll('[data-color]')) el.value = s.colors[el.dataset.color];
-  for (const k of ['showList', 'border', 'pinToDesktop', 'locked', 'openAtLogin']) $(`#${k}`).checked = !!s[k];
+  for (const k of ['showList', 'showQuick', 'border', 'pinToDesktop', 'locked', 'openAtLogin']) $(`#${k}`).checked = !!s[k];
   $('#holEnabled').checked = s.holidays.enabled;
   $('#holObs').checked = s.holidays.observances;
   $('#gEnabled').checked = s.google.enabled;
@@ -44,7 +44,7 @@ bind('bgOpacity', 'bgOpacity', (el) => Number(el.value) / 100);
 bind('todayOpacity', 'todayOpacity', (el) => Number(el.value) / 100);
 bind('bgColor', 'bgColor');
 bind('todayColor', 'todayColor');
-for (const k of ['showList', 'border', 'pinToDesktop', 'locked', 'openAtLogin']) bind(k, k, (el) => el.checked, 'change');
+for (const k of ['showList', 'showQuick', 'border', 'pinToDesktop', 'locked', 'openAtLogin']) bind(k, k, (el) => el.checked, 'change');
 for (const el of document.querySelectorAll('[data-color]')) {
   el.addEventListener('input', () => { s.colors = { ...s.colors, [el.dataset.color]: el.value }; outputs(); save({ colors: s.colors }); });
 }

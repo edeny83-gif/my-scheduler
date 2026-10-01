@@ -92,6 +92,7 @@ const DEFAULTS = {
   todayOpacity: 0.16,
   border: true,
   showList: true,
+  showQuick: true,               // 달력 아래 빠른 입력 칸(글·말로 일정 넣기)
   maxLanes: 3,
   locked: false,
   pinToDesktop: false,
@@ -586,6 +587,21 @@ ipcMain.handle('pick-files', async (e) => {
 });
 ipcMain.handle('ai-analyze', (e, { paths, instruction }) =>
   analyzeFiles(paths, instruction, (p) => { if (!e.sender.isDestroyed()) e.sender.send('ai-progress', p); }));
+// 빠른 입력: 글·말 → AI 분석 → 겹치지 않는 일정만 바로 추가 (되돌리기는 ai-undo)
+ipcMain.handle('ai-command', async (e, { text, audio }) => {
+  const r = await ai.analyzeCommand({ text, audio }, aiOpts({ onStage: (stage) => { if (!e.sender.isDestroyed()) e.sender.send('ai-progress', { stage }); } }));
+  const existing = store.list();
+  const ok = [], skipped = [];
+  for (const it of r.items) {
+    try {
+      const ev = itemToEvent(it, { color: settings.ai.color, source: 'ai' });
+      const dup = findDuplicate(ev, existing);
+      if (dup) skipped.push({ item: it, reason: '이미 있음' }); else ok.push(it);
+    } catch (err) { skipped.push({ item: it, reason: err.message }); }
+  }
+  const added = ok.length ? addItems(ok, 'ai', 'AI 비서') : [];
+  return { summary: r.summary, kind: r.kind, added: added.map((a, i) => ({ id: a.id, item: ok[i] })), skipped, undated: r.undated || [] };
+});
 ipcMain.handle('ai-add', (_e, items) => addItems(items, 'ai', 'AI 비서').map((x) => x.id));
 ipcMain.handle('ai-undo', (_e, ids) => { for (const id of ids) store.remove(id); });
 ipcMain.handle('ai-status', () => {

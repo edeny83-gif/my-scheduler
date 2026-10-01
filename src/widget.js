@@ -40,6 +40,7 @@ function applySettings(s) {
   r.setProperty('--today', rgba(s.todayColor, s.todayOpacity));
   $('#panel').classList.toggle('bordered', !!s.border);
   $('#list').hidden = !s.showList;
+  $('#quick').hidden = s.showQuick === false;
   document.body.classList.toggle('locked', !!s.locked);
   render();
 }
@@ -531,3 +532,95 @@ function showSync(st) {
 $('#sync').onclick = () => api.openSettings('s-sync');
 api.syncStatus().then(showSync);
 api.on('sync-state', showSync);
+
+// ---------------- 빠른 입력: 글이나 말로 적으면 AI가 알아듣고 바로 일정에 넣는다 ----------------
+const Q = { busy: false, rec: null, chunks: [], startAt: 0, timer: 0, last: [] };
+const qLabel = (it) => {
+  const d = fromYmd(it.date);
+  return `${new Date(d).getMonth() + 1}/${new Date(d).getDate()}(${DOW[new Date(d).getDay()]})${it.time ? ` ${it.time}` : ''} ${it.title}`;
+};
+function qShow(rows, acts = true) {
+  const box = $('#qres');
+  box.replaceChildren();
+  for (const [cls, text, onclick] of rows) {
+    const d = document.createElement('div');
+    d.className = cls; d.textContent = text; d.title = text;
+    if (onclick) d.onclick = onclick;
+    box.append(d);
+  }
+  if (acts) {
+    const a = document.createElement('div'); a.className = 'acts';
+    if (Q.last.length) {
+      const u = document.createElement('button'); u.textContent = '되돌리기';
+      u.onclick = async () => { const n = Q.last.length; await api.undoItems(Q.last); Q.last = []; qShow([['muted', `${n}개를 되돌렸습니다.`]]); };
+      a.append(u);
+    }
+    const c = document.createElement('button'); c.className = 'close'; c.textContent = '닫기';
+    c.onclick = () => { box.hidden = true; };
+    a.append(c);
+    box.append(a);
+  }
+  box.hidden = false;
+}
+function qBusy(on, stage = '분석 중') {
+  Q.busy = on;
+  $('#qtext').disabled = on; $('#qsend').disabled = on; $('#qmic').disabled = on && !Q.rec;
+  $('#qtext').placeholder = on ? `${stage}…` : '✦ 예: 다음 주 화요일 3시 학부모 상담';
+}
+async function qRun(req) {
+  qBusy(true); Q.last = [];
+  try {
+    const r = await api.aiCommand(req);
+    Q.last = r.added.map((a) => a.id);
+    const rows = [];
+    if (r.kind === 'voice' && r.summary) rows.push(['muted', `🎤 “${r.summary}”`]);
+    for (const a of r.added) rows.push(['ok', `✓ ${qLabel(a.item)}`, () => selectFromQuick(a.item.date)]);
+    for (const s of r.skipped) rows.push(['muted', `– ${s.item.date ? qLabel(s.item) : s.item.title} — ${s.reason}`]);
+    for (const u of r.undated) rows.push(['warn', `? 날짜를 몰라 넣지 못함: ${u.title}`]);
+    if (!rows.length || (rows.length === 1 && r.kind === 'voice')) rows.push(['muted', `넣을 일정을 찾지 못했습니다.${r.summary && r.kind !== 'voice' ? ` (${r.summary})` : ''}`]);
+    qShow(rows);
+    if (req.text) $('#qtext').value = '';
+  } catch (e) {
+    const msg = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    qShow([['err', msg, /API 키/.test(msg) ? () => api.openSettings('s-ai') : null]]);
+  }
+  qBusy(false);
+}
+function selectFromQuick(date) {
+  const ms = fromYmd(date);
+  selected = ms;
+  const d = new Date(ms); d.setDate(1); view = d.getTime();
+  render();
+}
+$('#qform').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = $('#qtext').value.trim();
+  if (text && !Q.busy) qRun({ text });
+});
+$('#qmic').onclick = async () => {
+  if (Q.rec) { Q.rec.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const rec = new MediaRecorder(stream);
+    Q.rec = rec; Q.chunks = []; Q.startAt = Date.now();
+    rec.ondataavailable = (e) => { if (e.data.size) Q.chunks.push(e.data); };
+    rec.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      clearInterval(Q.timer); Q.rec = null;
+      $('#qmic').classList.remove('rec'); $('#qmic').textContent = '🎤';
+      if (Date.now() - Q.startAt < 700) { qShow([['err', '너무 짧습니다. 🎤를 누르고 말한 뒤 다시 누르세요']]); qBusy(false); return; }
+      const blob = new Blob(Q.chunks, { type: rec.mimeType || 'audio/webm' });
+      const data = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(blob); });
+      qRun({ audio: { data, mime: blob.type } });
+    };
+    rec.start();
+    $('#qmic').classList.add('rec'); $('#qmic').textContent = '■';
+    $('#qres').hidden = true;
+    $('#qtext').disabled = true; $('#qsend').disabled = true;
+    const tick = () => { $('#qtext').placeholder = `듣는 중… ${Math.floor((Date.now() - Q.startAt) / 1000)}초 (■를 누르면 끝)`; };
+    tick(); Q.timer = setInterval(tick, 500);
+  } catch (e) {
+    qShow([['err', `마이크를 쓸 수 없습니다: ${e.message}. Windows 설정 → 개인 정보 → 마이크에서 데스크톱 앱 허용을 확인하세요`]]);
+  }
+};
+api.on('ai-progress', (p) => { if (Q.busy && p?.stage) $('#qtext').placeholder = `${p.stage}…`; });

@@ -97,6 +97,19 @@ const ok = (m) => console.log('  ✓', m);
   assert.strictEqual(captured.body.contents[0].parts[0].file_data.file_uri, 'https://f/1');
   ok(`업로드 시작 → 전송 → 처리 대기 → file_uri 사용 (${calls.length}번 호출)`);
 
+  console.log('빠른 입력 (글·말)');
+  await ai.analyzeCommand({ text: '다음 주 화요일 3시 학부모 상담' }, { fetch: fakeFetch, keys: { gemini: 'g' }, provider: 'gemini', geminiModel: 'gm', about: '3학년 담임' });
+  assert.strictEqual(captured.body.contents[0].parts.length, 1);
+  assert.ok(captured.body.contents[0].parts[0].text.includes('학부모 상담') && captured.body.contents[0].parts[0].text.includes('3학년 담임'));
+  const rc = await ai.analyzeCommand({ text: '상담' }, { fetch: claudeFetch, keys: { claude: 'c' }, provider: 'claude', claudeModel: 'cm' });
+  assert.ok(captured.url.includes('anthropic') && rc.kind === 'prompt');
+  const rv = await ai.analyzeCommand({ audio: { data: 'AAAA', mime: 'audio/webm;codecs=opus' } }, { fetch: fakeFetch, keys: { gemini: 'g', claude: 'c' }, provider: 'claude', geminiModel: 'gm' });
+  assert.strictEqual(captured.body.contents[0].parts[0].inline_data.mime_type, 'audio/webm');
+  assert.ok(captured.body.contents[0].parts[1].text.includes('직접 말한') && rv.kind === 'voice' && rv.provider === 'gemini');
+  await assert.rejects(ai.analyzeCommand({ audio: { data: 'A' } }, { fetch: fakeFetch, keys: { claude: 'c' } }), /Gemini API 키/);
+  await assert.rejects(ai.analyzeCommand({ text: '  ' }, { fetch: fakeFetch, keys: { gemini: 'g' } }), /내용을 입력/);
+  ok('글→Gemini/Claude, 말→Gemini(webm, 키 없으면 안내), 빈 입력 거부');
+
   console.log('MCP 서버 ↔ 캘린더 연결 창구');
   const apiFile = path.join(os.tmpdir(), 'api-test.json');
   const store = [];

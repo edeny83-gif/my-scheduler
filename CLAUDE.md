@@ -22,7 +22,7 @@ Windows 바탕화면 캘린더 위젯(Electron). 일정의 원본은 이 PC의 J
 | `tools/mcp-server.js` | Claude Code MCP 서버(외부 패키지 없음). 시작 시 데이터 폴더 `claude-code/`로 복사됨 |
 | `tools/cal.js` | 같은 기능의 명령줄 도구 |
 | `src/assistant.*` | AI 비서 창 (파일 올리기 → 결과 확인·수정 → 추가/되돌리기) |
-| `src/index.html·widget.css·widget.js` | 달력 위젯 화면 |
+| `src/index.html·widget.css·widget.js` | 달력 위젯 화면. 맨 아래 빠른 입력 칸(글·🎤 말 → IPC `ai-command` → `ai.analyzeCommand`, 설정 `showQuick`) |
 | `src/settings.*` | 설정 창(⚙) |
 | `test/` | `npm test`(iCal·저장·추출·AI 요청 형태·MCP 시험), `mock-api.js`·`mock-assistant.js`(브라우저 미리보기용 가짜 api), `fixtures/`(샘플 HWP·HWPX·DOCX) |
 

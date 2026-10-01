@@ -82,6 +82,7 @@ const SCHEMA = {
       type: 'ARRAY',
       items: { type: 'OBJECT', properties: { title: { type: 'STRING' }, note: { type: 'STRING' } }, required: ['title'] },
     },
+    deletes: { type: 'ARRAY', items: { type: 'STRING' } }, // 빠른 입력에서 "지워 줘" → 지울 일정 id
   },
   required: ['summary', 'items'],
 };
@@ -95,6 +96,7 @@ function parseJson(text) {
     summary: String(obj.summary || ''),
     items: Array.isArray(obj.items) ? obj.items : [],
     undated: Array.isArray(obj.undated) ? obj.undated : [],
+    deletes: Array.isArray(obj.deletes) ? obj.deletes.map(String) : [],
   };
 }
 
@@ -287,11 +289,23 @@ async function transcribe(file, { fetch: fetchFn, keys, geminiModel, onStage }) 
 
 // ---------------- 빠른 입력 (달력 아래 칸) ----------------
 // 폰 앱(src/core/ai.js)의 buildCommandPrompt·analyzeCommand와 같은 규칙
-function buildCommandPrompt({ about, text, voice }) {
+// 지우기 요청에 쓰도록 AI에게 보여 줄 내 일정 목록 (오늘 기준 앞뒤 기간, 너무 길면 자름)
+function eventLines(events = [], now = new Date()) {
+  const from = now.getTime() - 60 * 86_400_000, to = now.getTime() + 240 * 86_400_000;
+  return events
+    .filter((e) => !e.readOnly && !e.deleted && (e.end ?? e.start) >= from && e.start <= to)
+    .sort((a, b) => a.start - b.start)
+    .slice(0, 400)
+    .map((e) => { const d = new Date(e.start); return `${e.id} | ${ymd(d)} | ${e.allDay ? '종일' : `${pad(d.getHours())}:${pad(d.getMinutes())}`} | ${String(e.title).replace(/\s+/g, ' ')}`; })
+    .join('\n');
+}
+
+function buildCommandPrompt({ about, text, voice, events }) {
   const now = new Date();
+  const mine = eventLines(events, now);
   return `당신은 사용자의 일정 관리 비서입니다. 사용자: ${about || '학교 교사'}.
 ${voice ? '첨부한 음성은 사용자가 캘린더에 일정을 넣어 달라고 직접 말한 것입니다. 먼저 말한 내용을 그대로 받아 적어 summary에 넣으세요.' : `아래는 사용자가 캘린더에 넣어 달라고 직접 입력한 요청입니다.\n<요청>\n${text}\n</요청>`}
-요청에서 캘린더에 넣을 일정·할 일·마감을 찾아 주세요.
+요청에서 캘린더에 넣을 일정·할 일·마감을 찾아 주세요. 지워 달라는 요청이면 지울 일정을 찾아 주세요.
 
 오늘은 ${ymd(now)} (${DOW[now.getDay()]}요일), 한국 시간 ${pad(now.getHours())}:${pad(now.getMinutes())}입니다.
 
@@ -306,16 +320,23 @@ ${voice ? '첨부한 음성은 사용자가 캘린더에 일정을 넣어 달라
 - evidence에는 근거가 된 요청 속 표현을 40자 이내로. confidence는 0~1.
 - summary는 ${voice ? '받아 적은 말 그대로' : '한 문장 요약'}.
 - 일정 추가와 관계없는 말(인사, 질문 등)만 있으면 items를 비우고 summary에 짧게 답하세요.
+- 지우기: "삭제", "지워", "취소됐어", "빼 줘" 같은 요청이면 새 일정을 만들지 말고(items는 비움), 아래 <내 일정>에서 해당하는 일정의 id를 deletes에 넣으세요.
+  확실히 가리키는 것만 넣고, 애매하면 넣지 말고 summary에 무엇이 애매한지 짧게 쓰세요. "중복 지워 줘"면 같은 날 같은 일정 중 하나만 남기고 나머지 id를 넣으세요.
+  summary에는 무엇을 지우는지 한 문장으로 쓰세요.
+
+<내 일정> (id | 날짜 | 시각 | 제목)
+${mine || '(없음)'}
+</내 일정>
 
 출력은 아래 JSON 형식만:
-{"summary": "...", "items": [{"title": "", "kind": "일정|할 일|마감", "date": "YYYY-MM-DD", "endDate": "", "time": "", "endTime": "", "location": "", "memo": "", "evidence": "", "confidence": 0.9}], "undated": [{"title": "", "note": ""}]}`;
+{"summary": "...", "items": [{"title": "", "kind": "일정|할 일|마감", "date": "YYYY-MM-DD", "endDate": "", "time": "", "endTime": "", "location": "", "memo": "", "evidence": "", "confidence": 0.9}], "undated": [{"title": "", "note": ""}], "deletes": ["지울 일정 id"]}`;
 }
 
 /**
  * 빠른 입력: text(글) 또는 audio({ data: base64, mime }) 중 하나 → { summary, items[], undated[], provider, kind }
  * opts는 analyzeFile과 같다. 말(녹음)은 Gemini 키가 필요하다.
  */
-async function analyzeCommand({ text, audio }, opts) {
+async function analyzeCommand({ text, audio, events }, opts) {
   const { fetch: fetchFn, keys, onStage } = opts;
   text = String(text || '').trim();
   if (!text && !audio?.data) throw new Error('내용을 입력하세요');
@@ -329,7 +350,7 @@ async function analyzeCommand({ text, audio }, opts) {
     if (keys[other]) provider = other;
     else throw new Error('API 키가 없습니다. 설정 → AI 비서에서 키를 입력하세요');
   }
-  const prompt = buildCommandPrompt({ about: opts.about, text, voice: !!audio });
+  const prompt = buildCommandPrompt({ about: opts.about, text, voice: !!audio, events });
   onStage?.(audio ? '말을 듣고 분석 중' : '분석 중');
   let raw;
   if (provider === 'gemini') {

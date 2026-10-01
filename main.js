@@ -363,12 +363,17 @@ async function analyzeFiles(paths, instruction, onProgress) {
   }
   const existing = store.list();
   const today = sod(Date.now());
+  // 같은 문서를 HWP·PDF로 함께 올린 경우처럼, 이번에 분석한 파일들끼리도 같은 일정은 하나만 고른다
+  const batch = [];
   for (const r of results) {
     r.items = r.items.map((it) => {
       try {
         const ev = itemToEvent(it, { fileName: r.fileName });
         const dup = findDuplicate(ev, existing);
-        return { ...it, fileName: r.fileName, past: (ev.end ?? ev.start) < today, duplicate: dup ? dup.title : '' };
+        const twin = dup ? null : findDuplicate(ev, batch);
+        if (!dup && !twin) batch.push({ ...ev, fileName: r.fileName });
+        return { ...it, fileName: r.fileName, past: (ev.end ?? ev.start) < today,
+          duplicate: dup ? dup.title : twin ? `${twin.title} (${twin.fileName}에서 이미 찾음)` : '' };
       } catch (e) {
         return { ...it, fileName: r.fileName, invalid: e.message };
       }
@@ -379,15 +384,17 @@ async function analyzeFiles(paths, instruction, onProgress) {
 
 const eligible = (it) => !it.past && !it.duplicate && !it.invalid && (it.confidence ?? 1) >= settings.ai.minConfidence;
 
-/** 항목들을 일정으로 추가하고 Windows 알림으로 알린다 */
-function addItems(items, source = 'ai', who = 'AI 비서') {
+/** 항목들을 일정으로 추가하고 Windows 알림으로 알린다. skipDup이면 캘린더·넣는 것끼리 겹치는 일정은 뺀다 */
+function addItems(items, source = 'ai', who = 'AI 비서', { skipDup = false } = {}) {
   const added = [];
+  const have = skipDup ? store.list() : [];
   for (const it of items) {
     const ev = itemToEvent(it, {
       color: source === 'ai' ? settings.ai.color : '',
       source,
       fileName: it.fileName || it.sourceNote || '',
     });
+    if (skipDup && (findDuplicate(ev, have) || findDuplicate(ev, added))) continue;
     const id = store.add(ev);
     added.push({ id, ...ev });
   }
@@ -589,20 +596,26 @@ ipcMain.handle('ai-analyze', (e, { paths, instruction }) =>
   analyzeFiles(paths, instruction, (p) => { if (!e.sender.isDestroyed()) e.sender.send('ai-progress', p); }));
 // 빠른 입력: 글·말 → AI 분석 → 겹치지 않는 일정만 바로 추가 (되돌리기는 ai-undo)
 ipcMain.handle('ai-command', async (e, { text, audio }) => {
-  const r = await ai.analyzeCommand({ text, audio }, aiOpts({ onStage: (stage) => { if (!e.sender.isDestroyed()) e.sender.send('ai-progress', { stage }); } }));
+  const r = await ai.analyzeCommand({ text, audio, events: store.list() }, aiOpts({ onStage: (stage) => { if (!e.sender.isDestroyed()) e.sender.send('ai-progress', { stage }); } }));
+  // 지우기 요청: AI가 고른 id 중 실제로 있는 내 일정만 지운다(외부 캘린더는 대상 아님)
+  const removed = [...new Set(r.deletes || [])].map((id) => store.get(id)).filter(Boolean);
+  if (removed.length) store.remove(removed.map((x) => x.id));
   const existing = store.list();
-  const ok = [], skipped = [];
+  const ok = [], skipped = [], okEv = [];
   for (const it of r.items) {
     try {
       const ev = itemToEvent(it, { color: settings.ai.color, source: 'ai' });
-      const dup = findDuplicate(ev, existing);
+      const dup = findDuplicate(ev, existing) || findDuplicate(ev, okEv);
+      if (!dup) okEv.push(ev);
       if (dup) skipped.push({ item: it, reason: '이미 있음' }); else ok.push(it);
     } catch (err) { skipped.push({ item: it, reason: err.message }); }
   }
   const added = ok.length ? addItems(ok, 'ai', 'AI 비서') : [];
-  return { summary: r.summary, kind: r.kind, added: added.map((a, i) => ({ id: a.id, item: ok[i] })), skipped, undated: r.undated || [] };
+  return { summary: r.summary, kind: r.kind, added: added.map((a, i) => ({ id: a.id, item: ok[i] })), removed, skipped, undated: r.undated || [] };
 });
-ipcMain.handle('ai-add', (_e, items) => addItems(items, 'ai', 'AI 비서').map((x) => x.id));
+// 빠른 입력 되돌리기: 지운 일정을 되살린다
+ipcMain.handle('ai-restore', (_e, list) => store.addMany(list.map(({ id, createdAt, updatedAt, deleted, ...ev }) => ev)).map((x) => x.id));
+ipcMain.handle('ai-add', (_e, items) => addItems(items, 'ai', 'AI 비서', { skipDup: true }).map((x) => x.id));
 ipcMain.handle('ai-undo', (_e, ids) => { for (const id of ids) store.remove(id); });
 ipcMain.handle('ai-status', () => {
   const k = loadKeys();

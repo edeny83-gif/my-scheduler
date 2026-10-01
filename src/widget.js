@@ -532,7 +532,8 @@ api.syncStatus().then(showSync);
 api.on('sync-state', showSync);
 
 // ---------------- 빠른 입력: 글이나 말로 적으면 AI가 알아듣고 바로 일정에 넣는다 ----------------
-const Q = { busy: false, rec: null, chunks: [], startAt: 0, timer: 0, last: [] };
+const Q = { busy: false, rec: null, chunks: [], startAt: 0, timer: 0, last: [], removed: [] };
+const evLabel = (e) => { const d = new Date(e.start); return `${d.getMonth() + 1}/${d.getDate()}(${DOW[d.getDay()]})${e.allDay ? '' : ` ${hm(e.start)}`} ${e.title}`; };
 const qLabel = (it) => {
   const d = fromYmd(it.date);
   return `${new Date(d).getMonth() + 1}/${new Date(d).getDate()}(${DOW[new Date(d).getDay()]})${it.time ? ` ${it.time}` : ''} ${it.title}`;
@@ -548,9 +549,15 @@ function qShow(rows, acts = true) {
   }
   if (acts) {
     const a = document.createElement('div'); a.className = 'acts';
-    if (Q.last.length) {
+    if (Q.last.length || Q.removed.length) {
       const u = document.createElement('button'); u.textContent = '되돌리기';
-      u.onclick = async () => { const n = Q.last.length; await api.undoItems(Q.last); Q.last = []; qShow([['muted', `${n}개를 되돌렸습니다.`]]); };
+      u.onclick = async () => {
+        const n = Q.last.length + Q.removed.length;
+        if (Q.last.length) await api.undoItems(Q.last);
+        if (Q.removed.length) await api.restoreItems(Q.removed); // 지운 일정 되살리기
+        Q.last = []; Q.removed = [];
+        qShow([['muted', `${n}개를 되돌렸습니다.`]]);
+      };
       a.append(u);
     }
     const c = document.createElement('button'); c.className = 'close'; c.textContent = '닫기';
@@ -563,16 +570,18 @@ function qShow(rows, acts = true) {
 function qBusy(on, stage = '분석 중') {
   Q.busy = on;
   $('#qtext').disabled = on; $('#qsend').disabled = on; $('#qmic').disabled = on && !Q.rec;
-  $('#qtext').placeholder = on ? `${stage}…` : '✦ 예: 다음 주 화요일 3시 학부모 상담';
+  $('#qtext').placeholder = on ? `${stage}…` : '✦ 예: 내일 3시 상담 / 7일 연극 지워 줘';
 }
 async function qRun(req) {
-  qBusy(true); Q.last = [];
+  qBusy(true); Q.last = []; Q.removed = [];
   try {
     const r = await api.aiCommand(req);
     Q.last = r.added.map((a) => a.id);
+    Q.removed = r.removed || [];
     const rows = [];
     if (r.kind === 'voice' && r.summary) rows.push(['muted', `🎤 “${r.summary}”`]);
     for (const a of r.added) rows.push(['ok', `✓ ${qLabel(a.item)}`, () => selectFromQuick(a.item.date)]);
+    for (const e of Q.removed) rows.push(['err', `🗑 지움: ${evLabel(e)}`, () => selectFromQuick(ymd(e.start))]);
     for (const s of r.skipped) rows.push(['muted', `– ${s.item.date ? qLabel(s.item) : s.item.title} — ${s.reason}`]);
     for (const u of r.undated) rows.push(['warn', `? 날짜를 몰라 넣지 못함: ${u.title}`]);
     if (!rows.length || (rows.length === 1 && r.kind === 'voice')) rows.push(['muted', `넣을 일정을 찾지 못했습니다.${r.summary && r.kind !== 'voice' ? ` (${r.summary})` : ''}`]);

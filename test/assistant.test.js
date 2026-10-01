@@ -109,6 +109,19 @@ const ok = (m) => console.log('  ✓', m);
   await assert.rejects(ai.analyzeCommand({ audio: { data: 'A' } }, { fetch: fakeFetch, keys: { claude: 'c' } }), /Gemini API 키/);
   await assert.rejects(ai.analyzeCommand({ text: '  ' }, { fetch: fakeFetch, keys: { gemini: 'g' } }), /내용을 입력/);
   ok('글→Gemini/Claude, 말→Gemini(webm, 키 없으면 안내), 빈 입력 거부');
+  // 지우기: 내 일정 목록(id)을 AI에게 보여 주고 deletes를 받는다
+  const delFetch = async (url, init) => { captured = { url, body: JSON.parse(init.body) }; return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"summary":"7일 연극 지움","items":[],"deletes":["e2"]}' }] } }] }) }; };
+  const soon = Date.now() + 86_400_000 * 6;
+  const mine = [
+    { id: 'e1', title: '6학년 연극 6', start: soon, allDay: true }, { id: 'e2', title: '6학년 연극 6', start: soon, allDay: true },
+    { id: 'g1', title: '구글 일정', start: soon, allDay: true, readOnly: true }, { id: 'x', title: '지운 일정', start: soon, allDay: true, deleted: true },
+  ];
+  const rd = await ai.analyzeCommand({ text: '7일 연극 중복 지워 줘', events: mine }, { fetch: delFetch, keys: { gemini: 'g' }, provider: 'gemini', geminiModel: 'gm' });
+  const sent = captured.body.contents[0].parts[0].text;
+  assert.ok(sent.includes('e1 | ') && sent.includes('e2 | ') && !sent.includes('g1 | ') && !sent.includes('x | 지운'));
+  assert.deepStrictEqual(rd.deletes, ['e2']);
+  assert.deepStrictEqual(ai.parseJson('{"summary":"","items":[]}').deletes, []);
+  ok('지우기: 내 일정(외부·지운 일정 제외)을 id와 함께 보내고 deletes를 받음');
   ai.RETRY.ms = [0, 0];
   let n = 0;
   const busy = (times) => async (url, init) => {

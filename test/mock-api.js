@@ -39,6 +39,12 @@
     // 빠른 입력: "상담"이 들어가면 내일 15시 일정 하나를 넣는 가짜 AI
     aiCommand: async ({ text }) => {
       await new Promise((r) => setTimeout(r, 300));
+      if (/지워|삭제/.test(text)) { // 가짜 지우기: "체육대회" 지움
+        const removed = events.filter((e) => e.title === '체육대회');
+        events = events.filter((e) => !removed.includes(e));
+        listeners.events?.(events);
+        return { kind: 'prompt', summary: text, added: [], removed, skipped: [], undated: [] };
+      }
       const date = ymd(d(1));
       const item = { title: '학부모 상담', kind: '일정', date, time: '15:00' };
       const dup = events.some((e) => e.title === item.title && ymd(e.start) === date);
@@ -48,6 +54,7 @@
       listeners.events?.(events);
       return { kind: 'prompt', summary: text, added: [{ id, item }], skipped: [], undated: [{ title: '체육대회 준비' }] };
     },
+    restoreItems: async (list) => { events.push(...list.map((e) => ({ ...e, id: String(Math.random()) }))); listeners.events?.(events); },
     undoItems: async (ids) => { events = events.filter((x) => !ids.includes(x.id)); listeners.events?.(events); },
     on: (ch, cb) => { listeners[ch] = cb; },
   };

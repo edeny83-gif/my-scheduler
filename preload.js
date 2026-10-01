@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('api', {
   addItems: (items) => ipcRenderer.invoke('ai-add', items),
   undoItems: (ids) => ipcRenderer.invoke('ai-undo', ids),
   aiCommand: (req) => ipcRenderer.invoke('ai-command', req),
+  restoreItems: (list) => ipcRenderer.invoke('ai-restore', list),
   aiStatus: () => ipcRenderer.invoke('ai-status'),
   setKey: (provider, key) => ipcRenderer.invoke('ai-set-key', provider, key),
   testKey: (provider) => ipcRenderer.invoke('ai-test', provider),

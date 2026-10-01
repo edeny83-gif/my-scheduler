@@ -1,0 +1,36 @@
+# main에 병합(push)되면 테스트 → Windows 설치파일 빌드 → GitHub Releases 게시까지 자동으로 한다.
+# 버전은 package.json의 "주.부" 뒤에 실행 번호를 붙여 자동으로 올라간다 (예: 0.4.17).
+# 설치된 앱은 3시간마다 새 버전을 확인해 알림으로 알려 주고, 앱을 껐다 켜면 적용된다.
+name: Desktop Release
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', '.github/workflows/mobile-*.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm test
+      - run: npm run bundle
+      - name: 버전 정하기 (자동 증가)
+        run: |
+          BASE=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
+          npm version "${BASE}.${GITHUB_RUN_NUMBER}" --no-git-tag-version --allow-same-version
+          echo "이번 버전: $(node -p "require('./package.json').version")"
+      - run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

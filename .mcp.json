@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "myscheduler": {
+      "command": "node",
+      "args": ["tools/mcp-server.js"]
+    }
+  }
+}

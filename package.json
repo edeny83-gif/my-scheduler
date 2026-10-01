@@ -1,0 +1,67 @@
+{
+  "name": "my-scheduler-desktop",
+  "version": "0.4.0",
+  "description": "바탕화면 캘린더 위젯",
+  "author": "edeny83-gif",
+  "main": "main.js",
+  "scripts": {
+    "start": "node scripts/bundle.js && electron .",
+    "dist": "node scripts/bundle.js && electron-builder --win --publish never",
+    "test": "node test/feeds.test.js && node test/assistant.test.js && node test/sync.test.js",
+    "bundle": "node scripts/bundle.js"
+  },
+  "dependencies": {
+    "cfb": "^1.2.2",
+    "electron-updater": "^6.3.9",
+    "fflate": "^0.8.3",
+    "font-list": "^1.5.1",
+    "ical.js": "^1.5.0",
+    "koffi": "^2.9.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.28.2",
+    "firebase": "^12.19.0"
+  },
+  "build": {
+    "appId": "com.myscheduler.desktop",
+    "productName": "MyScheduler",
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!build/**",
+      "!test/**",
+      "!.mcp.json",
+      "!.github/**",
+      "!scripts/**"
+    ],
+    "asarUnpack": [
+      "node_modules/koffi/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "artifactName": "MyScheduler-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "MyScheduler-Portable-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "edeny83-gif",
+        "repo": "my-scheduler",
+        "releaseType": "release"
+      }
+    ]
+  }
+}

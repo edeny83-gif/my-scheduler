@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+<title>캘린더 설정</title>
+<link rel="stylesheet" href="settings.css">
+</head>
+<body>
+<nav>
+  <a href="#s-sync">동기화</a><a href="#s-look">모양</a><a href="#s-color">색상</a><a href="#s-window">창</a><a href="#s-cal">캘린더 연동</a><a href="#s-ai">AI 비서</a><a href="#s-cc">Claude Code</a>
+</nav>
+<main>
+  <section id="s-sync">
+    <h2>클라우드 동기화 (폰과 연동)</h2>
+    <p class="hint">폰 앱과 같은 계정으로 로그인하면 일정이 실시간으로 맞춰집니다. 이 PC에 이미 있는 일정은 처음 로그인할 때 함께 올라갑니다. 인터넷이 끊겨도 PC에서는 계속 쓸 수 있고, 연결되면 자동으로 맞춥니다.</p>
+    <p class="status" id="syncState"></p>
+    <div id="syncForm" class="stackbox">
+      <input type="email" id="syncEmail" placeholder="이메일" autocomplete="username">
+      <input type="password" id="syncPw" placeholder="비밀번호" autocomplete="current-password">
+      <div class="buttons"><button type="button" id="syncLogin" class="primary">로그인</button></div>
+    </div>
+    <div id="syncAccount" class="stackbox" hidden>
+      <p class="hint">로그인한 계정: <b id="syncWho"></b></p>
+      <div class="buttons"><button type="button" id="syncLogout">로그아웃</button></div>
+      <p class="hint">다른 계정으로 로그인하면 이 PC의 일정은 그 계정의 데이터로 바뀝니다.</p>
+    </div>
+  </section>
+
+  <section id="s-look">
+    <h2>글꼴과 크기</h2>
+    <label class="stack">글꼴 <small>이 컴퓨터에 설치된 글꼴</small>
+      <select id="fontFamily"></select>
+    </label>
+    <p id="preview" class="preview"><b>10</b>월 · 3 개천절 · 14:00 학년 협의회</p>
+    <div class="sliders">
+      <label class="slider">제목(년·월) <output data-for="titleSize"></output><input type="range" id="titleSize" min="18" max="72"></label>
+      <label class="slider">날짜 숫자 <output data-for="dateSize"></output><input type="range" id="dateSize" min="9" max="28"></label>
+      <label class="slider">일정 글자 <output data-for="eventSize"></output><input type="range" id="eventSize" min="9" max="26"></label>
+    </div>
+    <label class="row check"><input type="checkbox" id="showList"> 아래에 선택한 날의 일정 목록 표시</label>
+    <label class="slider">장기 일정 최대 줄 수 <output data-for="maxLanes"></output><input type="range" id="maxLanes" min="0" max="6"></label>
+  </section>
+
+  <section id="s-color">
+    <h2>색상과 투명도</h2>
+    <div class="colors">
+      <label>년·월 제목 <input type="color" data-color="title"></label>
+      <label>요일 머리글 <input type="color" data-color="weekday"></label>
+      <label>날짜 숫자 <input type="color" data-color="date"></label>
+      <label>일요일·공휴일 <input type="color" data-color="sunday"></label>
+      <label>토요일 <input type="color" data-color="saturday"></label>
+      <label>일정 기본 글자 <input type="color" data-color="event"></label>
+      <label>하단 목록 글자 <input type="color" data-color="list"></label>
+    </div>
+    <div class="pair">
+      <label>배경색 <input type="color" id="bgColor"></label>
+      <label class="slider grow">배경 불투명도 <output data-for="bgOpacity"></output>
+        <input type="range" id="bgOpacity" min="0" max="100"></label>
+    </div>
+    <div class="pair">
+      <label>오늘 칸 색 <input type="color" id="todayColor"></label>
+      <label class="slider grow">오늘 칸 진하기 <output data-for="todayOpacity"></output>
+        <input type="range" id="todayOpacity" min="0" max="60"></label>
+    </div>
+    <label class="row check"><input type="checkbox" id="border"> 테두리와 구분선 표시</label>
+    <button type="button" class="ghost" id="resetColors">색상·크기 기본값으로</button>
+  </section>
+
+  <section id="s-window">
+    <h2>창</h2>
+    <label class="row check"><input type="checkbox" id="pinToDesktop"> 다른 창 뒤에 깔기 <small id="pinNote">켜면 위젯이 다른 창들 뒤로 내려가 바탕화면에 붙어 있는 것처럼 보입니다. 안 보이면 트레이 아이콘 → "위젯 보이기"</small></label>
+    <label class="row check"><input type="checkbox" id="locked"> 위젯 잠금 <small>클릭이 바탕화면으로 통과 · 해제는 작업표시줄 트레이 아이콘 메뉴</small></label>
+    <label class="row check"><input type="checkbox" id="openAtLogin"> Windows 시작 시 자동 실행</label>
+    <div class="buttons">
+      <button type="button" data-win="fill">바탕화면 전체 크기로</button>
+      <button type="button" data-win="reset">위치·크기 초기화</button>
+    </div>
+    <p class="hint">위치는 위젯 윗부분(제목 줄)을 끌어서, 크기는 위젯 가장자리나 모서리를 끌어서 바꿉니다.</p>
+  </section>
+
+  <section id="s-cal">
+    <h2>캘린더 연동</h2>
+
+    <h3>국경일·공휴일</h3>
+    <label class="row check"><input type="checkbox" id="holEnabled"> 대한민국 공휴일 표시 (대체공휴일 포함, 자동 갱신)</label>
+    <label class="row check sub"><input type="checkbox" id="holObs"> 기념일도 표시 (어버이날, 스승의 날 등)</label>
+    <p class="status" data-status="holidays"></p>
+
+    <h3>구글 캘린더</h3>
+    <label class="row check"><input type="checkbox" id="gEnabled"> 구글 캘린더 연동</label>
+    <div id="gBox" class="sub stack-gap">
+      <label class="stack">구글 아이디 (이메일)
+        <input type="email" id="gEmail" placeholder="example@gmail.com" autocomplete="off">
+      </label>
+      <label class="stack">비공개 iCal 주소 <small>캘린더가 공개되어 있지 않다면 필요합니다</small>
+        <input type="url" id="gUrl" placeholder="https://calendar.google.com/calendar/ical/.../private-.../basic.ics" autocomplete="off">
+      </label>
+      <details>
+        <summary>비공개 iCal 주소 찾는 법</summary>
+        <ol>
+          <li>PC에서 구글 캘린더(calendar.google.com)를 엽니다.</li>
+          <li>왼쪽 "내 캘린더"에서 캘린더 이름 옆 ⋮ → <b>설정 및 공유</b>.</li>
+          <li>아래쪽 <b>캘린더 통합</b>의 <b>iCal 형식의 비공개 주소</b>를 복사해 붙여 넣습니다.</li>
+        </ol>
+        <p>이 주소를 아는 사람은 누구나 일정을 볼 수 있으니 다른 곳에 공유하지 마세요.</p>
+      </details>
+      <label class="inline">표시 색 <input type="color" id="gColor"></label>
+      <p class="status" data-status="google"></p>
+      <p class="hint">지금은 구글 일정을 <b>불러와 보여주기</b>만 합니다(30분마다 갱신). 이 위젯에서 입력한 일정을 구글로 보내는 양방향 동기화는 다음 단계(Firebase 연동)에서 추가합니다.</p>
+    </div>
+
+    <h3>외부 캘린더 (URL)</h3>
+    <p class="hint">학교·학년 캘린더, 네이버·아웃룩 등에서 제공하는 iCal(.ics) 주소를 넣으면 날짜별 일정을 불러옵니다. webcal:// 주소도 됩니다.</p>
+    <div id="cals"></div>
+    <button type="button" class="ghost" id="addCal">＋ 캘린더 주소 추가</button>
+
+    <div class="buttons"><button type="button" id="refresh">지금 새로고침</button></div>
+  </section>
+
+  <section id="s-ai">
+    <h2>AI 비서</h2>
+    <p class="hint">사진·문서(HWP, PDF)·녹음 파일을 위젯에 끌어다 놓거나 ✦ 버튼을 누르면, AI가 일정·할 일·마감을 찾아 캘린더에 넣습니다. 분석에는 본인의 API 키가 필요합니다(사용량만큼 요금이 청구될 수 있습니다).</p>
+
+    <h3>Gemini <small>문서·사진·녹음 모두 가능 · 녹음 분석은 Gemini만 됩니다</small></h3>
+    <div class="keyrow">
+      <input type="password" id="kGemini" placeholder="AIza… (Google AI Studio에서 발급)" autocomplete="off">
+      <button type="button" data-save="gemini">저장</button>
+      <button type="button" data-test="gemini">연결 확인</button>
+    </div>
+    <p class="status" id="stGemini"></p>
+    <details>
+      <summary>Gemini API 키 받는 법</summary>
+      <ol>
+        <li>aistudio.google.com 에 구글 계정으로 로그인합니다.</li>
+        <li>왼쪽 <b>Get API key</b> → <b>API 키 만들기</b>를 누릅니다.</li>
+        <li>만들어진 키(AIza로 시작)를 복사해 위 칸에 붙여 넣고 <b>저장</b>합니다.</li>
+      </ol>
+      <p>학교 업무 문서를 보낼 때는 개인정보가 담기지 않았는지 확인하세요. 무료 등급은 입력 내용이 서비스 개선에 쓰일 수 있습니다.</p>
+    </details>
+
+    <h3>Claude <small>문서·사진·PDF (녹음은 Gemini로 자동 전환)</small></h3>
+    <div class="keyrow">
+      <input type="password" id="kClaude" placeholder="sk-ant-… (console.anthropic.com에서 발급)" autocomplete="off">
+      <button type="button" data-save="claude">저장</button>
+      <button type="button" data-test="claude">연결 확인</button>
+    </div>
+    <p class="status" id="stClaude"></p>
+
+    <div class="pair2">
+      <label class="stack">기본으로 쓸 AI
+        <select id="aiProvider"><option value="gemini">Gemini</option><option value="claude">Claude</option></select>
+      </label>
+      <label class="stack">AI가 넣은 일정 글자색
+        <input type="color" id="aiColor">
+      </label>
+    </div>
+    <label class="stack">나에 대한 설명 <small>분석할 때 참고합니다. 예: 초등학교 3학년 담임, 과학 전담</small>
+      <input type="text" id="aiAbout" autocomplete="off">
+    </label>
+    <label class="row check"><input type="checkbox" id="aiAuto"> 확인 없이 바로 추가 <small>분석이 끝나면 확실한 일정(지난 날짜·중복·확신 낮음 제외)을 자동으로 넣고, 비서 창에서 되돌릴 수 있습니다</small></label>
+    <label class="slider">자동 선택 기준 (AI 확신도) <output data-for="aiMin"></output><input type="range" id="aiMin" min="30" max="95" step="5"></label>
+    <details>
+      <summary>모델 이름 바꾸기 (고급)</summary>
+      <div class="pair2">
+        <label class="stack">Gemini 모델 <input type="text" id="aiGeminiModel" autocomplete="off"></label>
+        <label class="stack">Claude 모델 <input type="text" id="aiClaudeModel" autocomplete="off"></label>
+      </div>
+      <p>새 모델이 나오면 이름만 바꾸면 됩니다. "모델을 찾을 수 없습니다" 오류가 나면 각 회사 문서에서 현재 모델 이름을 확인하세요.</p>
+    </details>
+  </section>
+
+  <section id="s-cc">
+    <h2>Claude Code 연결</h2>
+    <p class="hint">한 번 등록해 두면 Claude Code(데스크톱 앱·터미널·VS Code)에서 "이 공문 일정 넣어줘", "다음 주 일정 알려줘"처럼 말로 캘린더를 다룰 수 있습니다. 캘린더가 실행 중이어야 합니다. (웹 버전 Claude Code는 이 PC에 접속할 수 없어 연결되지 않습니다.)</p>
+    <p class="status" id="ccState"></p>
+    <h3>1. 등록 명령 (한 번만)</h3>
+    <p class="hint">명령 프롬프트나 PowerShell에 붙여 넣고 Enter. Node.js가 설치되어 있어야 합니다(clasp를 쓰고 있다면 이미 설치되어 있습니다).</p>
+    <div class="cmd"><code id="ccNode"></code><button type="button" data-copy="ccNode">복사</button></div>
+    <details>
+      <summary>Node.js가 없을 때 (설치형 캘린더 전용)</summary>
+      <div class="cmd"><code id="ccExe"></code><button type="button" data-copy="ccExe">복사</button></div>
+    </details>
+    <h3>2. 사용 예</h3>
+    <ul class="examples">
+      <li>"바탕화면의 10월 학사일정.hwp 읽고 우리 반 관련 일정 캘린더에 넣어줘"</li>
+      <li>"D:\녹음\학년협의회.m4a 들어보고 결정된 할 일 일정에 넣고 회의 요약해줘"</li>
+      <li>"다음 주 일정 정리해줘" · "금요일 체육대회를 다음 주 월요일로 옮겨줘"</li>
+    </ul>
+    <h3>3. 프로그램 고치기</h3>
+    <p class="hint">캘린더 자체를 바꾸고 싶을 때는 소스 폴더(my-scheduler-desktop)에서 Claude Code를 열고 "설정 창에 ○○ 기능 추가해줘"처럼 요청하세요. 폴더의 CLAUDE.md에 작업 규칙이 정리되어 있고, GitHub에 올리면 설치된 캘린더가 자동으로 업데이트됩니다.</p>
+    <div class="buttons"><button type="button" id="ccFolder">연결 도구 폴더 열기</button></div>
+  </section>
+</main>
+<script src="settings.js"></script>
+</body>
+</html>

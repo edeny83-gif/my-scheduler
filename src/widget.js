@@ -536,7 +536,7 @@ const Q = { busy: false, rec: null, chunks: [], startAt: 0, timer: 0, last: [], 
 const evLabel = (e) => { const d = new Date(e.start); return `${d.getMonth() + 1}/${d.getDate()}(${DOW[d.getDay()]})${e.allDay ? '' : ` ${hm(e.start)}`} ${e.title}`; };
 const qLabel = (it) => {
   const d = fromYmd(it.date);
-  return `${new Date(d).getMonth() + 1}/${new Date(d).getDate()}(${DOW[new Date(d).getDay()]})${it.time ? ` ${it.time}` : ''} ${it.title}`;
+  return `${new Date(d).getMonth() + 1}/${new Date(d).getDate()}(${DOW[new Date(d).getDay()]})${it.time ? ` ${it.time}${it.endTime ? `~${it.endTime}` : ''}` : ''} ${it.title}`;
 };
 function qShow(rows, acts = true) {
   const box = $('#qres');

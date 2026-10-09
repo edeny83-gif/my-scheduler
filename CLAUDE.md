@@ -18,6 +18,7 @@ Windows 바탕화면 캘린더 위젯(Electron). 일정의 원본은 이 PC의 J
 | `ai.js` | AI 비서: 파일 → 일정 후보(JSON). Gemini(문서·사진·PDF·음성, 15MB 넘으면 파일 업로드 API) / Claude(문서·사진·PDF). 프롬프트는 `buildPrompt` |
 | `extract.js` | HWP 5.x(OLE+레코드 파싱)·HWPX·DOCX·텍스트 글자 추출. AI가 직접 못 읽는 형식 담당 |
 | `convert.js` | AI·Claude Code의 날짜 문자열 항목 ↔ 저장 형식 변환, 알림 기본값, 중복 판별 |
+| `timeText.js` | 사람이 쓴 시각 글자 해석("오후 2시 반", "2시~3시", "14:00-15:30")과 AI 항목 시각 바로잡기(제목에 섞인 시각을 time·endTime으로). **폰의 `src/core/timeText.js`와 내용이 똑같아야 함** |
 | `api-server.js` | Claude Code용 로컬 HTTP 창구(127.0.0.1, 실행마다 새 토큰 → `api.json`) |
 | `tools/mcp-server.js` | Claude Code MCP 서버(외부 패키지 없음). 시작 시 데이터 폴더 `claude-code/`로 복사됨 |
 | `tools/cal.js` | 같은 기능의 명령줄 도구 |

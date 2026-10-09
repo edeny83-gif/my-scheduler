@@ -5,6 +5,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { extractText, TEXT_EXT } = require('./extract');
+const { fixItemTimes } = require('./timeText');
 
 const GEMINI = 'https://generativelanguage.googleapis.com';
 const ANTHROPIC = 'https://api.anthropic.com/v1/messages';
@@ -41,7 +42,8 @@ function buildPrompt({ about, instruction, fileName, kind }) {
 - date는 반드시 YYYY-MM-DD 절대 날짜. "다음 주 화요일", "이번 달 말", "개학 후 첫 주" 같은 표현은 오늘을 기준으로 계산하고 요일이 맞는지 검산하세요.
 - 연도가 적혀 있지 않으면 오늘 이후 가장 가까운 해당 날짜로 봅니다.
 - 날짜를 알 수 없는 항목은 items에 넣지 말고 undated에 넣으세요. 날짜를 지어내지 마세요.
-- time은 시각이 명시된 경우에만 HH:mm(24시간). 없으면 빈 문자열. endTime·endDate도 명시된 경우만.
+- time은 시각이 명시된 경우에만 HH:mm(24시간). 없으면 빈 문자열. 시간대(예: 14:00~15:30)면 끝 시각을 endTime에. endDate도 명시된 경우만.
+- title에는 날짜·시각을 넣지 마세요(시각은 time·endTime에만).
 - 여러 날 이어지는 일정은 date(시작)와 endDate(끝)를 모두 채우세요.
 - kind: 참석·행사 등은 "일정", 해야 할 업무는 "할 일", 제출·신청·납부 기한은 "마감".
 - title은 20자 이내로 구체적으로 (예: "학부모 상담 신청서 제출 마감", "3학년 협의회").
@@ -75,7 +77,7 @@ const SCHEMA = {
           evidence: { type: 'STRING' },
           confidence: { type: 'NUMBER' },
         },
-        required: ['title', 'kind', 'date'],
+        required: ['title', 'kind', 'date', 'time', 'endTime', 'endDate'], // 시각 칸을 빠뜨리지 않게(없으면 빈 문자열)
       },
     },
     undated: {
@@ -272,6 +274,7 @@ async function analyzeFile(file, opts) {
     raw = await claudeGenerate(fetchFn, keys.claude, opts.claudeModel, content, onStage);
   }
   const out = parseJson(raw);
+  out.items = out.items.map((it) => fixItemTimes(it)); // 시각이 제목에 섞이거나 "오후 3시"처럼 오면 바로잡기
   return { file, fileName, kind, provider, note, ...out };
 }
 
@@ -313,10 +316,13 @@ ${voice ? '첨부한 음성은 사용자가 캘린더에 일정을 넣어 달라
 - date는 반드시 YYYY-MM-DD 절대 날짜. "내일", "다음 주 화요일", "이번 달 말" 같은 표현은 오늘을 기준으로 계산하고 요일이 맞는지 검산하세요.
 - 연도가 없으면 오늘 이후 가장 가까운 해당 날짜로 봅니다.
 - 날짜를 알 수 없으면 items에 넣지 말고 undated에 넣으세요. 날짜를 지어내지 마세요.
-- time은 시각이 있을 때만 HH:mm(24시간). "오후 3시"는 15:00, 시각이 없으면 빈 문자열. "3시"처럼 오전·오후가 없으면 학교 일과 기준(1~6시는 오후)으로 판단하세요.
+- 시각·시간대: 시작 시각은 time, 끝 시각은 endTime에 HH:mm(24시간)으로 넣으세요. 시각이 전혀 없을 때만 둘 다 빈 문자열(종일 일정)입니다.
+  예) "2시~3시 반" → time 14:00, endTime 15:30 / "오후 3시" → time 15:00, endTime "" / "14:00-15:00" → time 14:00, endTime 15:00
+  "3시"처럼 오전·오후가 없으면 학교 일과 기준(1~6시는 오후)으로 판단하세요.
+- title에는 날짜·요일·시각을 넣지 마세요. 예) "10월 15일 2시~3시 학부모 상담" → title "학부모 상담"
 - 여러 날 이어지는 일정은 date(시작)와 endDate(끝)를 모두 채우세요. "매주" 같은 반복은 앞으로 4번까지만 각각 항목으로 만드세요.
 - kind: 참석·행사 등은 "일정", 해야 할 업무는 "할 일", 제출·신청·납부 기한은 "마감".
-- title은 20자 이내로 구체적으로. 장소는 location, 준비물·대상 등은 memo에 짧게.
+- title은 20자 이내로 구체적으로(시각 빼고). 장소는 location, 준비물·대상 등은 memo에 짧게.
 - evidence에는 근거가 된 요청 속 표현을 40자 이내로. confidence는 0~1.
 - summary는 ${voice ? '받아 적은 말 그대로' : '한 문장 요약'}.
 - 일정 추가와 관계없는 말(인사, 질문 등)만 있으면 items를 비우고 summary에 짧게 답하세요.
@@ -367,7 +373,11 @@ async function analyzeCommand({ text, audio, events }, opts) {
   } else {
     raw = await claudeGenerate(fetchFn, keys.claude, opts.claudeModel, [{ type: 'text', text: prompt }], onStage);
   }
-  return { kind: audio ? 'voice' : 'prompt', provider, ...parseJson(raw) };
+  const out = parseJson(raw);
+  // 시각이 제목에 섞이거나 빠진 경우 바로잡기. 일정이 하나뿐이면 사용자가 쓴(말한) 글에서 시각을 다시 읽어 채운다
+  const said = audio ? out.summary : text;
+  out.items = out.items.map((it) => fixItemTimes(it, out.items.length === 1 ? said : ''));
+  return { kind: audio ? 'voice' : 'prompt', provider, ...out };
 }
 
 /** 키 확인용 짧은 호출 */

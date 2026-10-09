@@ -1,5 +1,6 @@
 // AI·Claude Code가 주는 "사람이 읽는 형식"(날짜 문자열) ↔ 저장 형식(ms) 변환, 중복 판별
 const pad = (n) => String(n).padStart(2, '0');
+const { fixItemTimes } = require('./timeText');
 
 function parseYmd(s) {
   const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(s ?? '').trim());
@@ -25,6 +26,8 @@ function defaultRemind(kind, allDay) {
 
 /** {title, date, endDate?, time?, endTime?, allDay?, location?, memo?, evidence?, kind?, remind?, color?} → 저장용 일정 */
 function itemToEvent(it, { color = '', source = 'ai', fileName = '' } = {}) {
+  // "오후 3시"·"14:00~15:00"처럼 오거나 시각이 제목에 섞여 있으면 바로잡는다(안 그러면 종일 일정이 된다)
+  if (it.allDay !== true && !parseHm(it.time)) it = fixItemTimes(it);
   const title = String(it.title ?? '').trim();
   if (!title) throw new Error('제목이 없습니다');
   const d = parseYmd(it.date);

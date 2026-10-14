@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { extractText, TEXT_EXT } = require('./extract');
 const { fixItemTimes } = require('./timeText');
+const { parseReply } = require('./jsonReply');
 
 const GEMINI = 'https://generativelanguage.googleapis.com';
 const ANTHROPIC = 'https://api.anthropic.com/v1/messages';
@@ -89,18 +90,8 @@ const SCHEMA = {
   required: ['summary', 'items'],
 };
 
-function parseJson(text) {
-  const t = String(text || '').replace(/```(?:json)?/gi, '').trim();
-  const a = t.indexOf('{'), b = t.lastIndexOf('}');
-  if (a < 0 || b < a) throw new Error('AI 응답에서 결과(JSON)를 찾지 못했습니다');
-  const obj = JSON.parse(t.slice(a, b + 1));
-  return {
-    summary: String(obj.summary || ''),
-    items: Array.isArray(obj.items) ? obj.items : [],
-    undated: Array.isArray(obj.undated) ? obj.undated : [],
-    deletes: Array.isArray(obj.deletes) ? obj.deletes.map(String) : [],
-  };
-}
+// AI 답글 → { summary, items, undated, deletes }. 코드블록·앞뒤 설명·배열·잘린 답도 읽고, 못 읽으면 AI가 한 말을 담은 오류를 던진다 (jsonReply.js)
+const parseJson = parseReply;
 
 async function readError(res) {
   let body = '';
@@ -183,7 +174,11 @@ async function geminiGenerate(fetchFn, key, model, parts, json = true, onStage) 
   }, onStage);
   const data = await res.json();
   const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
-  if (!text) throw new Error(`AI가 빈 응답을 보냈습니다 (${data.candidates?.[0]?.finishReason || data.promptFeedback?.blockReason || '이유 없음'})`);
+  if (!text) {
+    const e = new Error(`AI가 빈 응답을 보냈습니다 (${data.candidates?.[0]?.finishReason || data.promptFeedback?.blockReason || '이유 없음'})`);
+    e.code = 'EMPTY'; // 같은 요청을 한 번 더 보내 본다
+    throw e;
+  }
   return text;
 }
 
@@ -203,7 +198,7 @@ async function claudeGenerate(fetchFn, key, model, content, onStage) {
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
       model,
-      max_tokens: 8000,
+      max_tokens: 16000, // 새 모델이 먼저 "생각"하느라 글자 수를 쓰고 답이 비는 일이 없게 넉넉히
       system: '당신은 일정 추출 비서입니다. 요청한 JSON 형식만 출력하고 다른 말은 하지 마세요.',
       messages: [{ role: 'user', content }],
     }),
@@ -212,7 +207,31 @@ async function claudeGenerate(fetchFn, key, model, content, onStage) {
     return r;
   }, onStage);
   const data = await res.json();
-  return (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+  const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+  if (!text.trim()) {
+    const e = new Error(`AI가 빈 응답을 보냈습니다 (${data.stop_reason || '이유 없음'})`);
+    e.code = 'EMPTY';
+    throw e;
+  }
+  return text;
+}
+
+// 답을 결과(JSON)로 읽지 못하면: 같은 AI에게 형식만 지키라고 한 번 더 → 그래도 안 되면 (키가 있으면) 다른 AI로. 키·한도·붐빔 같은 오류는 그대로 알린다
+const STRICT = '\n\n※ 앞의 답은 결과 형식(JSON)이 아니라서 읽을 수 없었습니다. 설명·인사말 없이, 위의 "출력은 아래 JSON 형식만"에 맞는 JSON 하나만 출력하세요.';
+async function askAndParse(asks, onStage, log) {
+  let last;
+  for (let i = 0; i < asks.length; i++) {
+    try {
+      const r = await asks[i]();
+      return { out: parseJson(r.raw), provider: r.provider };
+    } catch (e) {
+      if (e.code !== 'NO_JSON' && e.code !== 'EMPTY') throw e;
+      last = e;
+      log?.('AI 답을 읽지 못함', `시도 ${i + 1}/${asks.length}`, e.code, e.snippet || e.message);
+      if (i < asks.length - 1) onStage?.('AI 답을 다시 확인하는 중');
+    }
+  }
+  throw last;
 }
 
 /**
@@ -249,13 +268,12 @@ async function analyzeFile(file, opts) {
   const prompt = buildPrompt({ about: opts.about, instruction: opts.instruction, fileName, kind });
 
   onStage?.(kind === 'audio' ? '녹음 듣고 분석 중' : 'AI 분석 중');
-  let raw;
+  let ask; // 질문 글을 받아 AI에게 묻고 답글을 돌려준다 (파일은 한 번만 올리고 다시 묻을 때도 그대로 쓴다)
   if (provider === 'gemini') {
     const parts = [];
     if (extracted) parts.push({ text: `<문서 내용 "${fileName}">\n${extracted.text}\n</문서 내용>` });
     else parts.push(await geminiFilePart(fetchFn, keys.gemini, file, mime, onStage));
-    parts.push({ text: prompt });
-    raw = await geminiGenerate(fetchFn, keys.gemini, opts.geminiModel, parts, true, onStage);
+    ask = (p) => geminiGenerate(fetchFn, keys.gemini, opts.geminiModel, [...parts, { text: p }], true, onStage);
   } else {
     const content = [];
     if (extracted) content.push({ type: 'text', text: `<문서 내용 "${fileName}">\n${extracted.text}\n</문서 내용>` });
@@ -270,10 +288,9 @@ async function analyzeFile(file, opts) {
         ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }
         : { type: 'image', source: { type: 'base64', media_type: mime, data } });
     }
-    content.push({ type: 'text', text: prompt });
-    raw = await claudeGenerate(fetchFn, keys.claude, opts.claudeModel, content, onStage);
+    ask = (p) => claudeGenerate(fetchFn, keys.claude, opts.claudeModel, [...content, { type: 'text', text: p }], onStage);
   }
-  const out = parseJson(raw);
+  const { out } = await askAndParse([async () => ({ raw: await ask(prompt) }), async () => ({ raw: await ask(prompt + STRICT) })], onStage, opts.log);
   out.items = out.items.map((it) => fixItemTimes(it)); // 시각이 제목에 섞이거나 "오후 3시"처럼 오면 바로잡기
   return { file, fileName, kind, provider, note, ...out };
 }
@@ -317,6 +334,7 @@ ${voice ? '첨부한 음성은 사용자가 캘린더에 일정을 넣어 달라
 - 연도가 없으면 오늘 이후 가장 가까운 해당 날짜로 봅니다.
 - 날짜를 알 수 없으면 items에 넣지 말고 undated에 넣으세요. 날짜를 지어내지 마세요.
 - 시각·시간대: 시작 시각은 time, 끝 시각은 endTime에 HH:mm(24시간)으로 넣으세요. 시각이 전혀 없을 때만 둘 다 빈 문자열(종일 일정)입니다.
+  "하루종일"·"종일"이라고 했으면 시각을 지어내지 말고 둘 다 빈 문자열로 두세요.
   예) "2시~3시 반" → time 14:00, endTime 15:30 / "오후 3시" → time 15:00, endTime "" / "14:00-15:00" → time 14:00, endTime 15:00
   "3시"처럼 오전·오후가 없으면 학교 일과 기준(1~6시는 오후)으로 판단하세요.
 - title에는 날짜·요일·시각을 넣지 마세요. 예) "10월 15일 2시~3시 학부모 상담" → title "학부모 상담"
@@ -335,7 +353,8 @@ ${mine || '(없음)'}
 </내 일정>
 
 출력은 아래 JSON 형식만:
-{"summary": "...", "items": [{"title": "", "kind": "일정|할 일|마감", "date": "YYYY-MM-DD", "endDate": "", "time": "", "endTime": "", "location": "", "memo": "", "evidence": "", "confidence": 0.9}], "undated": [{"title": "", "note": ""}], "deletes": ["지울 일정 id"]}`;
+{"summary": "...", "items": [{"title": "", "kind": "일정|할 일|마감", "date": "YYYY-MM-DD", "endDate": "", "time": "", "endTime": "", "location": "", "memo": "", "evidence": "", "confidence": 0.9}], "undated": [{"title": "", "note": ""}], "deletes": []}
+(지울 일정이 없으면 deletes는 빈 배열 [] 로 두세요)`;
 }
 
 /**
@@ -358,26 +377,28 @@ async function analyzeCommand({ text, audio, events }, opts) {
   }
   const prompt = buildCommandPrompt({ about: opts.about, text, voice: !!audio, events });
   onStage?.(audio ? '말을 듣고 분석 중' : '분석 중');
-  let raw;
-  if (provider === 'gemini') {
-    const parts = audio ? [{ inline_data: { mime_type: String(audio.mime || 'audio/webm').split(';')[0], data: audio.data } }, { text: prompt }] : [{ text: prompt }];
-    try {
-      raw = await geminiGenerate(fetchFn, keys.gemini, opts.geminiModel, parts, true, onStage);
-    } catch (e) {
-      // Gemini가 계속 붐비면 Claude 키가 있을 때 글 요청은 Claude로 대신 보낸다
-      if (!BUSY.has(e.status) || audio || !keys.claude) throw e;
-      onStage?.('Gemini가 붐벼 Claude로 분석 중');
-      provider = 'claude';
-      raw = await claudeGenerate(fetchFn, keys.claude, opts.claudeModel, [{ type: 'text', text: prompt }], onStage);
+  // prov로 한 번 묻는다. Gemini가 계속 붐비면 Claude 키가 있을 때 글 요청은 Claude로 대신 보낸다
+  const run = async (prov, promptText) => {
+    if (prov === 'gemini') {
+      const parts = audio ? [{ inline_data: { mime_type: String(audio.mime || 'audio/webm').split(';')[0], data: audio.data } }, { text: promptText }] : [{ text: promptText }];
+      try {
+        return { raw: await geminiGenerate(fetchFn, keys.gemini, opts.geminiModel, parts, true, onStage), provider: 'gemini' };
+      } catch (e) {
+        if (!BUSY.has(e.status) || audio || !keys.claude) throw e;
+        onStage?.('Gemini가 붐벼 Claude로 분석 중');
+        return { raw: await claudeGenerate(fetchFn, keys.claude, opts.claudeModel, [{ type: 'text', text: promptText }], onStage), provider: 'claude' };
+      }
     }
-  } else {
-    raw = await claudeGenerate(fetchFn, keys.claude, opts.claudeModel, [{ type: 'text', text: prompt }], onStage);
-  }
-  const out = parseJson(raw);
-  // 시각이 제목에 섞이거나 빠진 경우 바로잡기. 일정이 하나뿐이면 사용자가 쓴(말한) 글에서 시각을 다시 읽어 채운다
+    return { raw: await claudeGenerate(fetchFn, keys.claude, opts.claudeModel, [{ type: 'text', text: promptText }], onStage), provider: 'claude' };
+  };
+  const other = provider === 'gemini' ? 'claude' : 'gemini';
+  const asks = [() => run(provider, prompt), () => run(provider, prompt + STRICT)];
+  if (!audio && keys[other]) asks.push(() => run(other, prompt + STRICT)); // 글 요청은 다른 AI에게도 (녹음은 Gemini만 들을 수 있다)
+  const { out, provider: used } = await askAndParse(asks, onStage, opts.log);
+  // 시각이 제목에 섞이거나 빠진 경우 바로잡기. 일정이 하나뿐이면 사용자가 쓴(말한) 글에서 시각을 다시 읽어 채운다("하루종일"이면 종일로)
   const said = audio ? out.summary : text;
   out.items = out.items.map((it) => fixItemTimes(it, out.items.length === 1 ? said : ''));
-  return { kind: audio ? 'voice' : 'prompt', provider, ...out };
+  return { kind: audio ? 'voice' : 'prompt', provider: used, ...out };
 }
 
 /** 키 확인용 짧은 호출 */

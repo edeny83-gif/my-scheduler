@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const { LocalStore } = require('./store');
 const { Feeds } = require('./feeds');
 const pin = require('./pin');
+const { createDock } = require('./dock');
 const ai = require('./ai');
 const { extractText } = require('./extract');
 const { itemToEvent, eventToItem, findDuplicate, parseYmd, sod } = require('./convert');
@@ -95,7 +96,7 @@ const DEFAULTS = {
   showQuick: true,               // 달력 아래 빠른 입력 칸(글·말로 일정 넣기)
   maxLanes: 3,
   locked: false,
-  pinToDesktop: false,
+  docked: false,                 // 바탕화면에 붙이기(설치): 항상 다른 창 뒤 · 끌어도 안 움직임 · 더블클릭해야 입력 (dock.js)
   settingsVersion: 2,
   openAtLogin: true,
   holidays: { enabled: true, observances: false },
@@ -118,6 +119,7 @@ let settings;
 let store;
 let feeds;
 let widget, settingsWin, assistantWin, tray;
+let dock = null;
 let apiServer = null;
 let sync = null;
 let checkUpdates = null; // 설치본에서만 만들어짐 (자동 업데이트)
@@ -129,6 +131,9 @@ function loadSettings() {
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(userFile('settings.json'), 'utf8')); } catch {}
   if ((saved.settingsVersion || 1) < 2) { saved.pinToDesktop = false; saved.locked = false; } // 0.2.0의 고정 방식은 창이 안 보일 수 있었음
+  // 예전 "다른 창 뒤에 깔기"를 켜 두었다면 새 "바탕화면에 붙이기"로 이어 준다
+  if (saved.docked === undefined && saved.pinToDesktop) saved.docked = true;
+  delete saved.pinToDesktop;
   return {
     ...DEFAULTS,
     ...saved,
@@ -142,6 +147,16 @@ function loadSettings() {
 function saveSettings() {
   fs.writeFileSync(userFile('settings.json'), JSON.stringify(settings, null, 2));
 }
+// 붙이면 다른 창에 가려 위젯이 안 보일 수 있으니, 어떻게 쓰는지 알림으로 한 번 알려 준다
+function notifyDocked() {
+  try {
+    if (!Notification.isSupported()) return;
+    new Notification({
+      title: '바탕화면에 붙였어요',
+      body: '이제 항상 다른 창 뒤에 있어요. 바탕화면을 보려면 창을 내리거나 Win+D를 누르세요.\n입력은 위젯을 더블클릭, 위치·크기는 ⚙를 누르세요.',
+    }).show();
+  } catch (e) { log('붙임 알림 실패', e); }
+}
 function broadcast(channel, data) {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(channel, data);
 }
@@ -152,7 +167,10 @@ function updateSettings(patch) {
   if (['holidays', 'google', 'calendars'].some((k) => k in patch && JSON.stringify(prev[k]) !== JSON.stringify(settings[k]))) {
     feeds.configure(settings);
   }
-  if ('pinToDesktop' in patch && prev.pinToDesktop !== settings.pinToDesktop) applyPin();
+  if ('docked' in patch && !!prev.docked !== !!settings.docked && dock) { // 설치·붙임 풀기 (설정창 체크박스·트레이·위젯 버튼 모두 이 길)
+    dock.apply();
+    if (settings.docked) notifyDocked();
+  }
   applyWindowSettings();
   broadcast('settings', settings);
   return settings;
@@ -189,6 +207,12 @@ function createWidget() {
     title: 'MyScheduler',
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
   });
+  dock = createDock({
+    getWin: () => widget, pin, log,
+    getSettings: () => settings,
+    update: (patch) => updateSettings(patch),
+    send: (channel, data) => broadcast(channel, data),
+  });
   widget.loadFile(path.join(__dirname, 'src', 'index.html'));
   const wc = widget.webContents;
   wc.on('did-fail-load', (_e, code, desc) => fatal('화면을 불러오지 못했습니다', code + ' ' + desc));
@@ -199,35 +223,31 @@ function createWidget() {
   const showIt = () => {
     if (shown || widget.isDestroyed()) return;
     shown = true;
-    widget.show();
-    log('위젯 표시', widget.getBounds());
-    revealOnTop(); // 처음에는 맨 앞에 잠깐 띄워서 위치를 알려준다
+    log('위젯 표시', widget.getBounds(), 'docked=' + !!settings.docked);
+    if (settings.docked) {
+      // 붙여 둔 상태로 시작: 앞으로 튀어나오지 않고 조용히 바탕화면 위로 (다른 작업 중인 창의 입력을 가로채지 않게 showInactive)
+      widget.showInactive();
+      dock.init();
+    } else {
+      widget.show();
+      dock.init();
+      revealOnTop(); // 처음에는 맨 앞에 잠깐 띄워서 위치를 알려준다
+    }
   };
   widget.once('ready-to-show', showIt);
   setTimeout(showIt, 4000); // ready-to-show가 안 와도 강제로 표시
   widget.on('moved', saveBounds);
-  // "다른 창 뒤에 깔기" 옵션을 켠 경우에만: 클릭해도 다른 창 위로 올라오지 않게 맨 아래로 유지
-  widget.on('focus', () => { if (settings.pinToDesktop) setTimeout(() => pin.toBottom(widget), 50); });
+  // 붙여 둔 경우: 활성화되어 앞으로 올라오면 곧바로 다시 뒤로, 다른 곳으로 넘어가면 입력 상태를 끝낸다 (dock.js)
+  widget.on('focus', () => dock.onFocus());
+  widget.on('blur', () => dock.onBlur());
   applyWindowSettings();
 }
 
-// 위젯을 잠깐 맨 앞으로 (실행 직후, 바로가기·트레이를 다시 눌렀을 때 "여기 있다"를 보여줌)
+// 위젯을 잠깐 맨 앞으로 (실행 직후, 바로가기·트레이를 다시 눌렀을 때 "여기 있다"를 보여줌). 붙여 둔 상태면 잠시 뒤 다시 뒤로
 function revealOnTop() {
   if (!widget || widget.isDestroyed()) return;
-  if (widget.isMinimized()) widget.restore();
   if (!onScreen(widget.getBounds())) widget.setBounds(defaultBounds());
-  widget.setAlwaysOnTop(true, 'floating');
-  widget.show();
-  widget.focus();
-  setTimeout(() => {
-    if (widget.isDestroyed()) return;
-    widget.setAlwaysOnTop(false);
-    applyPin();
-  }, 3500);
-}
-
-function applyPin() {
-  if (widget && !widget.isDestroyed() && settings.pinToDesktop) log('맨 아래로 내림:', pin.toBottom(widget));
+  dock.reveal(3500);
 }
 
 function saveBounds() {
@@ -276,14 +296,16 @@ function createTray() {
 }
 function buildTrayMenu() {
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '일정 추가', click: () => { if (settings.locked) updateSettings({ locked: false }); windowAction('show'); widget.webContents.send('open-add'); } },
+    { label: '일정 추가', click: () => { if (settings.locked) updateSettings({ locked: false }); windowAction('show'); if (settings.docked) dock.activate(); widget.webContents.send('open-add'); } },
     { label: 'AI 비서 (파일로 일정 만들기)', click: () => openAssistant() },
     { label: '클라우드 동기화 (폰 연동)', click: () => openSettings('s-sync') },
     { label: '설정', click: () => openSettings() },
     { type: 'separator' },
     { label: '위젯 잠금 (클릭이 바탕화면으로 통과)', type: 'checkbox', checked: !!settings.locked, click: (i) => updateSettings({ locked: i.checked }) },
-    { label: '위젯 보이기 (맨 앞으로)', click: () => windowAction('show') },
-    { label: '다른 창 뒤에 깔기', type: 'checkbox', checked: !!settings.pinToDesktop, click: (i) => updateSettings({ pinToDesktop: i.checked }) },
+    { label: '위젯 보이기 (잠깐 맨 앞으로)', click: () => windowAction('show') },
+    settings.docked
+      ? { label: '위치·크기 조정하기 (붙임 풀기)', click: () => dock.edit() }
+      : { label: '바탕화면에 붙이기 (설치)', click: () => dock.install() },
     { label: '바탕화면 전체 크기로', click: () => windowAction('fill') },
     { label: '위치·크기 초기화', click: () => windowAction('reset') },
     { type: 'separator' },
@@ -341,6 +363,7 @@ const aiOpts = (extra = {}) => ({
   geminiModel: settings.ai.geminiModel,
   claudeModel: settings.ai.claudeModel,
   about: settings.ai.about,
+  log,
   ...extra,
 });
 
@@ -550,6 +573,7 @@ ipcMain.handle('get-state', () => ({
   holidays: feeds.holidays,
   feedStatus: feeds.status,
   pinAvailable: pin.available(),
+  dock: dock.state(),
 }));
 ipcMain.handle('add-event', (_e, ev) => store.add(ev));
 ipcMain.handle('update-event', (_e, id, ev) => store.update(id, ev));
@@ -566,6 +590,14 @@ ipcMain.handle('get-fonts', async () => {
 ipcMain.handle('update-settings', (_e, patch) => updateSettings(patch));
 ipcMain.handle('reset-settings', (_e, keys) => updateSettings(Object.fromEntries(keys.map((k) => [k, structuredClone(DEFAULTS[k])]))));
 ipcMain.handle('open-settings', (_e, section) => openSettings(section));
+// 위젯의 ⚙: 한 번만 눌러도 설정창이 열리고, 붙어 있었다면 풀려서 위치·크기를 바로 조정할 수 있다
+ipcMain.handle('gear', () => { dock.edit(); openSettings(); });
+ipcMain.handle('dock-install', () => dock.install());
+ipcMain.handle('dock-edit', () => dock.edit());
+ipcMain.handle('dock-activate', () => dock.activate());
+ipcMain.handle('dock-deactivate', () => dock.deactivate('요청'));
+ipcMain.on('dock-ping', (_e, busy) => dock.ping(!!busy));
+ipcMain.on('dock-rearm', () => dock.rearm());
 ipcMain.handle('refresh-feeds', () => feeds.refresh());
 ipcMain.handle('window-action', (_e, name) => windowAction(name));
 
@@ -638,9 +670,9 @@ ipcMain.handle('claude-code-info', () => claudeCodeInfo());
 ipcMain.handle('copy-text', (_e, text) => clipboard.writeText(String(text)));
 ipcMain.handle('open-path', (_e, p) => shell.openPath(String(p)));
 
-ipcMain.on('resize-start', (_e, edge) => { resizeState = { edge: String(edge), b: widget.getBounds() }; });
+ipcMain.on('resize-start', (_e, edge) => { if (settings.docked) return; resizeState = { edge: String(edge), b: widget.getBounds() }; }); // 붙여 둔 동안은 크기 조절 불가
 ipcMain.on('resize-move', (_e, dx, dy) => {
-  if (!resizeState) return;
+  if (!resizeState || settings.docked) return;
   const MIN_W = 320, MIN_H = 300;
   let { x, y, width, height } = resizeState.b;
   const E = resizeState.edge;
@@ -696,6 +728,8 @@ app.whenReady().then(() => {
   log('단계6 캘린더 연동 설정 완료');
   startApi().catch((e) => log('Claude Code 연결 창구 시작 실패', e));
   setInterval(checkReminders, 20_000);
+  setInterval(() => dock.enforce(), 15_000); // 붙여 둔 동안 다른 프로그램이 순서를 바꿔 놓으면 바로잡는다(이미 맞으면 아무 일도 안 함)
+  setInterval(() => dock.tick(), 250); // 붙여 둔 동안 앞에 있는 다른 창을 기억해 둔다(위젯을 눌러 키보드 입력이 넘어오면 되돌려 주려고)
 
   if (app.isPackaged) {
     const { autoUpdater } = require('electron-updater');
@@ -724,4 +758,4 @@ app.whenReady().then(() => {
 });
 app.on('second-instance', () => { log('두 번째 실행 → 기존 위젯 앞으로'); windowAction('show'); });
 app.on('window-all-closed', () => { /* 트레이에 상주 */ });
-app.on('will-quit', () => apiServer?.close());
+app.on('will-quit', () => { dock?.dispose(); apiServer?.close(); });

@@ -13,12 +13,14 @@ Windows 바탕화면 캘린더 위젯(Electron). 일정의 원본은 이 PC의 J
 | `src/firebase-config.js` | Firebase 웹 설정(공개 값) |
 | `firestore.rules` | 보안 규칙: users/{uid} 아래는 본인만 |
 | `feeds.js` | 공휴일·구글·외부 캘린더 iCal 받아오기/해석(ical.js), 디스크 캐시, 30분 주기 갱신 |
-| `pin.js` | "다른 창 뒤에 깔기"(koffi로 SetWindowPos HWND_BOTTOM). 기본 꺼짐. 소유자=Progman 방식은 창이 안 보이는 문제가 있어 폐기 |
+| `pin.js` | Windows 창 순서·활성화 호출(koffi → user32). 위젯을 **바탕화면 바로 위·다른 모든 창 아래**로 내리기(HWND_BOTTOM만 쓰면 바탕화면 창 밑으로 들어가 안 보일 수 있어 바탕화면 창을 찾아 그 위에 맞춤, 이미 맞으면 호출 없음), 클릭 활성화 방지 속성(`Chrome.IgnoreMouseActivate`), 앞에 있던 창 기억·되돌리기. 소유자=Progman 방식은 창이 안 보이는 문제가 있어 폐기 |
+| `dock.js` | **바탕화면에 붙이기(설치)** 상태 관리(Electron·Windows 호출은 주입 → `test/dock.test.js`로 시험). 자유(edit) ↔ 붙임(idle) ↔ 입력(active). 아래 "바탕화면에 붙이기" 참고 |
 | `preload.js` | 화면에 노출하는 `window.api` |
-| `ai.js` | AI 비서: 파일 → 일정 후보(JSON). Gemini(문서·사진·PDF·음성, 15MB 넘으면 파일 업로드 API) / Claude(문서·사진·PDF). 프롬프트는 `buildPrompt` |
+| `ai.js` | AI 비서: 파일 → 일정 후보(JSON). Gemini(문서·사진·PDF·음성, 15MB 넘으면 파일 업로드 API) / Claude(문서·사진·PDF). 프롬프트는 `buildPrompt`. 답을 못 읽으면(`askAndParse`) 같은 AI에게 형식만 지키라고 한 번 더 → 키가 있으면 다른 AI로, 서버가 붐비면(503) 재시도·Claude로 대신 |
 | `extract.js` | HWP 5.x(OLE+레코드 파싱)·HWPX·DOCX·텍스트 글자 추출. AI가 직접 못 읽는 형식 담당 |
 | `convert.js` | AI·Claude Code의 날짜 문자열 항목 ↔ 저장 형식 변환, 알림 기본값, 중복 판별 |
-| `timeText.js` | 사람이 쓴 시각 글자 해석("오후 2시 반", "2시~3시", "14:00-15:30")과 AI 항목 시각 바로잡기(제목에 섞인 시각을 time·endTime으로). **폰의 `src/core/timeText.js`와 내용이 똑같아야 함** |
+| `timeText.js` | 사람이 쓴 시각 글자 해석("오후 2시 반", "2시~3시", "14:00-15:30")과 AI 항목 시각 바로잡기(제목에 섞인 시각을 time·endTime으로, "하루종일"이면 종일로). **폰의 `src/core/timeText.js`와 내용이 똑같아야 함** |
+| `jsonReply.js` | AI 답글에서 결과(JSON)를 너그럽게 찾기(코드블록·앞뒤 설명·배열·잘린 답·쉼표). 못 찾으면 AI가 한 말을 담은 쉬운 오류. **폰의 `src/core/jsonReply.js`와 내용이 똑같아야 함** |
 | `api-server.js` | Claude Code용 로컬 HTTP 창구(127.0.0.1, 실행마다 새 토큰 → `api.json`) |
 | `tools/mcp-server.js` | Claude Code MCP 서버(외부 패키지 없음). 시작 시 데이터 폴더 `claude-code/`로 복사됨 |
 | `tools/cal.js` | 같은 기능의 명령줄 도구 |
@@ -26,6 +28,15 @@ Windows 바탕화면 캘린더 위젯(Electron). 일정의 원본은 이 PC의 J
 | `src/index.html·widget.css·widget.js` | 달력 위젯 화면. 맨 아래 빠른 입력 칸(글·🎤 말 → IPC `ai-command` → `ai.analyzeCommand`, 설정 `showQuick`) |
 | `src/settings.*` | 설정 창(⚙) |
 | `test/` | `npm test`(iCal·저장·추출·AI 요청 형태·MCP 시험), `mock-api.js`·`mock-assistant.js`(브라우저 미리보기용 가짜 api), `fixtures/`(샘플 HWP·HWPX·DOCX) |
+
+## 바탕화면에 붙이기 (설치) — `dock.js`
+- 설정 `docked`(기본 꺼짐). 예전 `pinToDesktop`을 켜 둔 사용자는 `loadSettings`가 `docked`로 이어 준다.
+- **자유(edit)**: 일반 창. 제목 줄 끌기·가장자리 손잡이로 위치·크기 조정. 위쪽에 "📌 바탕화면에 설치" 안내 줄(`#dockbar`)과 점선 테두리. 처음 설치한 사용자의 기본 상태.
+- **붙임(idle)**: 설치 버튼을 누르면 "착" 하는 효과(`.snap`) 뒤 바탕화면 바로 위·다른 창 아래로 내려감. 화면 위를 보호막(`#shield`)이 덮어 눌러도·끌어도·휠을 굴려도 아무 일 없음(제목 줄 끌기·크기 손잡이도 꺼짐, main의 `resize-*`도 무시). **⚙만 보호막 위에서 한 번 눌러도** 열림.
+- **입력(active)**: 보호막을 더블클릭하면 걷히고 누른 자리에 해당하는 동작(날짜 칸 → 그 날 일정 추가, 버튼·빠른 입력 칸 등)을 이어서 함. 30초(입력 창·AI 작업 중이면 2분) 안 쓰거나 Esc·다른 창을 누르면 다시 붙임.
+- **⚙ 한 번**: `gear` IPC → `dock.edit()`(붙임 풀기) + 설정창 열기 → 위치·크기를 바로 조정. 조정이 끝나면 "📌 바탕화면에 설치"를 다시 누른다. 트레이·설정창 체크박스("바탕화면에 붙이기")도 같은 길(`updateSettings({docked})` → `dock.apply()`).
+- **Windows에서 꼭 알아 둘 것(직접 확인 못 함)**: Chromium은 클릭 때 창 스타일(WS_EX_NOACTIVATE)과 상관없이 창을 활성화한다. 그래서 ① 클릭 전에 `Chrome.IgnoreMouseActivate` 속성을 걸어 두고(마우스를 놓을 때·250ms마다 다시), ② 그래도 활성화되면 `focus` 이벤트에서 곧바로 뒤로 내리고 앞에 있던 창으로 키보드 입력을 돌려준다. Electron `setFocusable(false)`는 **클릭을 삼켜서** 쓰지 않는다.
+- 시험: `npm test`의 `dock.test.js`가 가짜 창·가짜 user32·가짜 시계로 상태 흐름과 창 순서(바탕화면 바로 위, 항상-위 창 뒤에 끼지 않음)를 확인한다. 실제 Windows 동작은 이 환경에서 못 본다 → 문제가 생기면 `startup.log`의 "붙임" 줄을 요청한다.
 
 ## 클라우드 동기화
 - 서버 경로 `users/{uid}/events/{id}`. 필드: title,start,end,allDay,location,memo,color,remind,source,createdAt,updatedAt,deleted (모두 숫자 ms·기본 타입).

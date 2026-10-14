@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node scripts/bundle.js && electron .",
     "dist": "node scripts/bundle.js && electron-builder --win --publish never",
-    "test": "node test/feeds.test.js && node test/assistant.test.js && node test/sync.test.js",
+    "test": "node test/feeds.test.js && node test/assistant.test.js && node test/sync.test.js && node test/dock.test.js",
     "bundle": "node scripts/bundle.js"
   },
   "dependencies": {

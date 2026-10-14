@@ -133,6 +133,7 @@ function render() {
       if (key === todayKey) cell.classList.add('today');
       if (day === selected) cell.classList.add('selected');
       cell.style.gridColumn = String(i + 1);
+      cell.dataset.day = String(day); // 붙인 상태에서 더블클릭했을 때 어느 날짜인지 알려고
       cell.onclick = () => selectDay(day);
       cell.ondblclick = () => openForm(null, day);
       week.append(cell);
@@ -382,6 +383,7 @@ function openForm(item, day) {
   $('#del').hidden = ro || !item;
   $('#form').showModal();
   if (!ro) $('#t').focus();
+  pingNow();
 }
 
 $('#ad').onchange = () => {
@@ -468,7 +470,7 @@ $('#next').onclick = () => changeMonth(1);
 $('#today').onclick = () => changeMonth(0);
 $('#add').onclick = () => openForm(null);
 $('#listAdd').onclick = () => openForm(null, selected);
-$('#gear').onclick = () => api.openSettings();
+$('#gear').onclick = () => api.gear(); // 한 번만 눌러도 설정창이 열리고, 붙어 있었다면 풀려서 위치·크기를 조정할 수 있다
 $('#assist').onclick = () => api.openAssistant([]);
 
 // 파일을 위젯에 끌어놓으면 AI 비서로 보낸다
@@ -506,6 +508,7 @@ api.on('open-add', () => openForm(null));
 
 let rawHolidays = [];
 api.getState().then((st) => {
+  applyDock(st.dock || { docked: false, active: false });
   events = st.events;
   external = st.external;
   rawHolidays = st.holidays;
@@ -513,6 +516,78 @@ api.getState().then((st) => {
   setHolidays(rawHolidays);
   render();
 });
+
+// ---------------- 바탕화면에 붙이기 ----------------
+//  자유(editing)   끌어서 옮기고 가장자리로 크기를 바꾼다. 위의 "📌 바탕화면에 설치"를 누르면 붙는다.
+//  붙임(shielded)  달력 위를 보호막이 덮어 눌러도 끌어도 아무 일이 없다. ⚙만 한 번 눌러 열 수 있다. 더블클릭하면 걷힌다.
+//  입력(dock-active) 보호막이 걷힌 상태. 한동안 안 쓰거나 Esc·다른 창을 누르면 다시 붙임으로 돌아간다.
+let dock = { docked: false, active: false };
+let toastT = 0;
+function toast(msg, ms = 2600) {
+  const t = $('#toast');
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastT);
+  toastT = setTimeout(() => { t.hidden = true; }, ms);
+}
+function playSnap() {
+  const p = $('#panel');
+  p.classList.remove('snap'); void p.offsetWidth; p.classList.add('snap');
+  setTimeout(() => p.classList.remove('snap'), 700);
+  toast('📌 바탕화면에 붙었어요 · 더블클릭하면 입력 · ⚙로 다시 조정', 3600);
+}
+function applyDock(d, { snap } = {}) {
+  const wasActive = dock.active;
+  dock = { docked: !!d.docked, active: !!d.docked && !!d.active };
+  const b = document.body.classList;
+  b.toggle('docked', dock.docked);
+  b.toggle('shielded', dock.docked && !dock.active);
+  b.toggle('editing', !dock.docked);
+  b.toggle('dock-active', dock.docked && dock.active);
+  $('#dockbar').hidden = dock.docked;
+  // 입력 상태가 끝나는데 입력 창이 열려 있으면 닫는다 (뒤에 숨은 채 남지 않게)
+  if (wasActive && !dock.active && $('#form').open) $('#form').close();
+  if (dock.active) { $('#toast').hidden = true; b.remove('nudge'); }
+  if (snap || d.snap) playSnap();
+}
+api.on('dock-state', (d) => applyDock(d));
+$('#dockNow').onclick = async () => { applyDock(await api.dockInstall()); };
+
+// 보호막: 한 번 누르면 "더블클릭" 안내 말풍선이 꿈틀하고, 더블클릭하면 걷고 누른 자리에 해당하는 동작을 이어서 한다
+let nudgeT = 0;
+$('#shield').addEventListener('pointerup', () => api.dockRearm()); // 클릭 한 번마다 풀리는 "활성화 방지"를 다시 걸어 둔다
+$('#shield').addEventListener('click', () => {
+  document.body.classList.add('nudge');
+  clearTimeout(nudgeT);
+  nudgeT = setTimeout(() => document.body.classList.remove('nudge'), 600);
+});
+$('#shield').addEventListener('dblclick', async (e) => {
+  const x = e.clientX, y = e.clientY;
+  applyDock(await api.dockActivate());
+  if (dock.active) requestAnimationFrame(() => forwardClick(x, y));
+});
+function forwardClick(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!el || el.id === 'shield') return;
+  const target = el.closest('.ev, .span, .more, #listItems li, button, input, .sync');
+  if (target) { target.click?.(); if (target.tagName === 'INPUT') target.focus(); return; }
+  const cell = el.closest('.cell');
+  if (cell?.dataset.day) { const day = Number(cell.dataset.day); selectDay(day); openForm(null, day); } // 날짜 칸 더블클릭 = 그 날 일정 추가
+}
+// 쓰는 중이라는 신호 (일정 시간 쓰지 않으면 다시 붙는다). 입력 창이 열려 있거나 AI가 일하는 중이면 "바쁨"으로 알림
+const dockBusy = () => $('#form').open || Q.busy || !!Q.rec;
+let lastPing = 0;
+const ping = () => {
+  if (!dock.active) return;
+  const t = Date.now();
+  if (t - lastPing < 1000) return;
+  lastPing = t;
+  api.dockPing(dockBusy());
+};
+// 입력 창을 열거나 AI가 일을 시작하면 바로 "바쁨"을 알려서, 곧바로 뒤로 숨어 버리지 않게 한다
+const pingNow = () => { if (dock.active) { lastPing = Date.now(); api.dockPing(dockBusy()); } };
+for (const ev of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'input']) window.addEventListener(ev, ping, true);
+setInterval(() => { if (dock.active && dockBusy()) { lastPing = Date.now(); api.dockPing(true); } }, 10_000);
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && dock.active && !$('#form').open) api.dockDeactivate(); });
 
 // 자정이 지나면 오늘 표시 갱신
 let lastDay = ymd(Date.now());
@@ -569,6 +644,7 @@ function qShow(rows, acts = true) {
 }
 function qBusy(on, stage = '분석 중') {
   Q.busy = on;
+  pingNow();
   $('#qtext').disabled = on; $('#qsend').disabled = on; $('#qmic').disabled = on && !Q.rec;
   $('#qtext').placeholder = on ? `${stage}…` : '✦ 예: 내일 3시 상담 / 7일 연극 지워 줘';
 }

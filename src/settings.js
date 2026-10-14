@@ -13,7 +13,7 @@ function fill() {
   $('#bgColor').value = s.bgColor;
   $('#todayColor').value = s.todayColor;
   for (const el of document.querySelectorAll('[data-color]')) el.value = s.colors[el.dataset.color];
-  for (const k of ['showList', 'showQuick', 'border', 'pinToDesktop', 'locked', 'openAtLogin']) $(`#${k}`).checked = !!s[k];
+  for (const k of ['showList', 'showQuick', 'border', 'docked', 'locked', 'openAtLogin']) $(`#${k}`).checked = !!s[k];
   $('#holEnabled').checked = s.holidays.enabled;
   $('#holObs').checked = s.holidays.observances;
   $('#gEnabled').checked = s.google.enabled;
@@ -44,7 +44,7 @@ bind('bgOpacity', 'bgOpacity', (el) => Number(el.value) / 100);
 bind('todayOpacity', 'todayOpacity', (el) => Number(el.value) / 100);
 bind('bgColor', 'bgColor');
 bind('todayColor', 'todayColor');
-for (const k of ['showList', 'showQuick', 'border', 'pinToDesktop', 'locked', 'openAtLogin']) bind(k, k, (el) => el.checked, 'change');
+for (const k of ['showList', 'showQuick', 'border', 'docked', 'locked', 'openAtLogin']) bind(k, k, (el) => el.checked, 'change');
 for (const el of document.querySelectorAll('[data-color]')) {
   el.addEventListener('input', () => { s.colors = { ...s.colors, [el.dataset.color]: el.value }; outputs(); save({ colors: s.colors }); });
 }
@@ -147,9 +147,8 @@ function showStatus() {
   const st = await api.getState();
   s = st.settings;
   feedStatus = st.feedStatus || {};
-  if (!st.pinAvailable) {
-    $('#pinToDesktop').disabled = true;
-    $('#pinNote').textContent = '이 환경에서는 사용할 수 없습니다';
+  if (!st.pinAvailable) { // 창 순서를 바꾸는 기능을 못 불러온 PC: 붙이기(끌어도 안 움직임·더블클릭 입력)는 되지만 "항상 맨 뒤"는 안 된다
+    $('#dockNote').append(document.createElement('br'), '※ 이 PC에서는 "항상 맨 뒤" 기능을 쓸 수 없어, 붙여도 다른 창 위로 올라올 수 있습니다.');
   }
   const fonts = await api.getFonts();
   const sel = $('#fontFamily');
@@ -163,7 +162,7 @@ function showStatus() {
 api.on('feed-status', (st) => { feedStatus = st; showStatus(); });
 api.on('settings', (ns) => {
   s = ns;
-  for (const k of ['locked', 'pinToDesktop']) $(`#${k}`).checked = !!s[k]; // 트레이에서 바꾼 값 반영
+  for (const k of ['locked', 'docked']) $(`#${k}`).checked = !!s[k]; // 트레이·위젯에서 바꾼 값 반영
 });
 
 // ---------------- AI 비서 ----------------

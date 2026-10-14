@@ -83,6 +83,10 @@ function stripTime(text, f) {
     .trim();
 }
 
+// 사용자가 "하루종일"·"종일"이라고 분명히 말했는지. "종일반"·"종일제" 같은 반 이름은 제외
+const ALLDAY = /하루\s*종일|온\s*종일|종일(?![반제과])|all[\s-]*day/i;
+const saysAllDay = (text) => ALLDAY.test(String(text ?? ''));
+
 /** time·endTime 칸 값 → { start, end } (이미 "HH:mm"이면 그대로 믿는다) */
 function readField(v) {
   const s = String(v ?? '').trim();
@@ -97,10 +101,12 @@ function readField(v) {
  *  - time·endTime이 "오후 3시", "14:00~15:00"처럼 와도 "HH:mm"으로
  *  - time이 비었는데 제목에 시각이 있으면 가져오고, 제목에서는 시각을 뺀다
  *  - sourceText(사용자가 쓴 요청)에 시각이 하나뿐이면 빠진 시작·끝 시각을 채운다
+ *  - sourceText에 "하루종일"이 있고 시각은 없는데 AI가 시각을 넣었으면 종일 일정으로 되돌린다
  * allDay:true로 분명히 정한 항목은 건드리지 않는다.
  */
 function fixItemTimes(it, sourceText = '') {
   if (!it || it.allDay === true) return it;
+  if (sourceText && saysAllDay(sourceText) && !findTimes(sourceText).length) return { ...it, time: '', endTime: '', allDay: true };
   const x = { ...it };
   const t = readField(x.time), e = readField(x.endTime);
   x.time = t ? fmt(t.start) : '';
@@ -122,4 +128,4 @@ function fixItemTimes(it, sourceText = '') {
   return x;
 }
 
-module.exports = { findTimes, stripTime, fixItemTimes };
+module.exports = { findTimes, stripTime, fixItemTimes, saysAllDay };

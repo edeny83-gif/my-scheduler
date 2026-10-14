@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
-const CHANNELS = ['events', 'external', 'settings', 'feed-status', 'select-date', 'open-add', 'assistant-files', 'ai-progress', 'sync-state'];
+const CHANNELS = ['events', 'external', 'settings', 'feed-status', 'select-date', 'open-add', 'assistant-files', 'ai-progress', 'sync-state', 'dock-state'];
 
 contextBridge.exposeInMainWorld('api', {
   getState: () => ipcRenderer.invoke('get-state'),
@@ -11,6 +11,13 @@ contextBridge.exposeInMainWorld('api', {
   updateSettings: (patch) => ipcRenderer.invoke('update-settings', patch),
   resetSettings: (keys) => ipcRenderer.invoke('reset-settings', keys),
   openSettings: (section) => ipcRenderer.invoke('open-settings', section),
+  gear: () => ipcRenderer.invoke('gear'),                        // ⚙: 설정창을 열고 위치·크기 조정도 켠다
+  dockInstall: () => ipcRenderer.invoke('dock-install'),         // 지금 위치·크기 그대로 바탕화면에 붙이기
+  dockEdit: () => ipcRenderer.invoke('dock-edit'),
+  dockActivate: () => ipcRenderer.invoke('dock-activate'),       // 더블클릭: 붙은 채로 입력하기
+  dockDeactivate: () => ipcRenderer.invoke('dock-deactivate'),
+  dockPing: (busy) => ipcRenderer.send('dock-ping', !!busy),     // 쓰는 중이라는 신호
+  dockRearm: () => ipcRenderer.send('dock-rearm'),               // 붙여 둔 위젯: 다음 클릭도 활성화되지 않게
   syncStatus: () => ipcRenderer.invoke('sync-status'),
   syncLogin: (email, password) => ipcRenderer.invoke('sync-login', email, password),
   syncLogout: () => ipcRenderer.invoke('sync-logout'),

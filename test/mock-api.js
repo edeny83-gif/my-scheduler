@@ -6,7 +6,7 @@
     fontFamily: 'Noto Sans CJK KR', titleSize: 34, dateSize: 13, eventSize: 12,
     colors: { title: '#ffffff', weekday: '#d5dde8', date: '#f4f7fb', sunday: '#ff8f8f', saturday: '#90b8ff', event: '#a8e0ff', list: '#f4f7fb' },
     bgColor: '#16202c', bgOpacity: 0.35, todayColor: '#ffffff', todayOpacity: 0.16, border: true, showList: true, showQuick: true, maxLanes: 3,
-    locked: false, pinToDesktop: true, holidays: { enabled: true, observances: false }, google: { enabled: true, color: '#ffd28a' }, calendars: [],
+    locked: false, docked: false, holidays: { enabled: true, observances: false }, google: { enabled: true, color: '#ffd28a' }, calendars: [],
   };
   let events = [
     { id: '1', title: '학년 협의회', start: d(0, 15), end: d(0, 16), allDay: false, color: '', remind: [10], location: '3층 회의실', memo: '' },
@@ -25,9 +25,19 @@
   const ymd = (ms) => { const x = new Date(ms); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`; };
   const holidays = [{ date: ymd(d(4)), name: '개천절', holiday: true }, { date: ymd(d(13)), name: '한글날', holiday: true }];
   const listeners = {};
-  window.__mock = { settings, listeners };
+  // 바탕화면에 붙이기(dock.js)의 가짜: 설치 → 붙임, 더블클릭 → 입력, ⚙ → 붙임 풀기
+  let dockState = { docked: false, active: false };
+  const setDock = (s, extra = {}) => { dockState = s; settings.docked = s.docked; listeners['dock-state']?.({ ...s, ...extra }); };
+  window.__mock = { settings, listeners, calls: [], get dock() { return dockState; } };
   window.api = {
-    getState: async () => ({ settings, events, external, holidays, feedStatus: { holidays: { ok: true, at: Date.now() } }, pinAvailable: true }),
+    getState: async () => ({ settings, events, external, holidays, feedStatus: { holidays: { ok: true, at: Date.now() } }, pinAvailable: true, dock: dockState }),
+    gear: async () => { window.__mock.calls.push('gear'); setDock({ docked: false, active: false }); },
+    dockInstall: async () => { setDock({ docked: true, active: false }, { snap: true }); return dockState; },
+    dockEdit: async () => { setDock({ docked: false, active: false }); return dockState; },
+    dockActivate: async () => { if (dockState.docked) setDock({ docked: true, active: true }); return dockState; },
+    dockDeactivate: async () => { if (dockState.docked) setDock({ docked: true, active: false }); return dockState; },
+    dockPing: (busy) => { window.__mock.calls.push(['ping', busy]); },
+    dockRearm: () => { window.__mock.calls.push('rearm'); },
     addEvent: async (e) => { events.push({ ...e, id: String(Math.random()) }); listeners.events?.(events); },
     updateEvent: async (id, e) => { events = events.map((x) => x.id === id ? { ...x, ...e } : x); listeners.events?.(events); },
     deleteEvent: async (id) => { events = events.filter((x) => x.id !== id); listeners.events?.(events); },

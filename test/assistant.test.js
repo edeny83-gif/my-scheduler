@@ -165,6 +165,84 @@ const ok = (m) => console.log('  ✓', m);
   assert.strictEqual(rf.provider, 'claude');
   ok('AI 서버가 붐비면(503) 두 번 다시 시도 → 그래도 안 되면 Claude로 대신, 없으면 쉬운 안내');
 
+  console.log('AI 답을 읽지 못할 때 (빠른 입력이 "결과(JSON)를 찾지 못했습니다"로 실패하던 문제)');
+  const { parseReply } = require('../jsonReply');
+  const A = { title: '체육대회', date: '2026-11-05' };
+  const pr = (s) => parseReply(s);
+  assert.deepStrictEqual(pr('{"summary":"s","items":[{"title":"체육대회","date":"2026-11-05"}]}').items, [A]);
+  assert.deepStrictEqual(pr('```json\n{"summary":"s","items":[{"title":"체육대회","date":"2026-11-05"}]}\n```').items, [A], '코드블록');
+  assert.deepStrictEqual(pr('네, 추가하겠습니다.\n{"summary":"x","items":[{"title":"체육대회","date":"2026-11-05"}]}\n도움이 되었길 바랍니다 {끝}').items, [A], '앞뒤 설명');
+  assert.deepStrictEqual(pr('[{"title":"체육대회","date":"2026-11-05"}]').items, [A], '배열만');
+  assert.deepStrictEqual(pr('{"title":"체육대회","date":"2026-11-05"}').items, [A], '일정 하나만');
+  assert.deepStrictEqual(pr('{"events":[{"title":"체육대회","date":"2026-11-05"}]}').items, [A], 'events 이름');
+  assert.deepStrictEqual(pr('{"summary":"s","items":[{"title":"체육대회","date":"2026-11-05",},],}').items, [A], '끝에 남은 쉼표');
+  assert.deepStrictEqual(pr('{"summary":"s","items":[{"title":"체육대회","date":"2026-11-05"},{"title":"덜 쓴","da').items, [A], '끝이 잘린 답: 덜 쓴 항목은 버림');
+  assert.strictEqual(pr('{"summary":"줄1\n줄2","items":[]}').summary, '줄1\n줄2', '글자 안 줄바꿈');
+  assert.strictEqual(pr('{"summary":"a } b ] c","items":[]}').summary, 'a } b ] c', '글자 안 괄호');
+  assert.deepStrictEqual(pr('{"result":{"summary":"s","items":[{"title":"체육대회","date":"2026-11-05"}]}}').items, [A], '한 겹 더 싸인 답');
+  assert.strictEqual(pr('예시: {"summary":"...","items":[],"deletes":["지울 일정 id"]}\n결과: {"summary":"ok","items":[{"title":"체육대회","date":"2026-11-05"}]}').summary, 'ok', '예시를 따라 쓴 뒤 진짜 답이 오면 뒤의 것');
+  assert.throws(() => pr('죄송합니다. 요청하신 일정을 추가할 수 없습니다.'), (e) => e.code === 'NO_JSON' && e.message.includes('AI가 보낸 말: “죄송합니다') && /다시 한 번/.test(e.message));
+  assert.throws(() => pr('  '), (e) => e.code === 'EMPTY');
+  assert.deepStrictEqual(ai.parseJson('{"summary":"","items":[]}').deletes, []);
+  ok('코드블록·앞뒤 설명·배열·일정 하나·쉼표·잘린 답·줄바꿈·괄호·한 겹 더 싸인 답을 읽고, 못 읽으면 AI가 한 말을 보여 줌');
+  const phoneJson = path.join(__dirname, '..', '..', 'my-scheduler-mobile', 'src', 'core', 'jsonReply.js');
+  if (fs.existsSync(phoneJson)) assert.strictEqual(fs.readFileSync(phoneJson, 'utf8'), fs.readFileSync(path.join(__dirname, '..', 'jsonReply.js'), 'utf8'), '폰 jsonReply.js와 내용이 다름');
+
+  const { saysAllDay } = require('../timeText');
+  for (const s of ['11월5일 하루종일 체육대회', '하루 종일 연수', '종일 근무', '온종일 행사', 'all day']) assert.ok(saysAllDay(s), s);
+  for (const s of ['종일반 상담', '종일제 교사 면담', '내일 상담']) assert.ok(!saysAllDay(s), s);
+  const cmd = { about: '교사', geminiModel: 'gm', claudeModel: 'cm', provider: 'gemini' };
+  const userText = "11월5일 하루종일 '주안이 어린이집 체육대회' 일정 추가해줘";
+  const gem = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+  const cla = (text) => ({ ok: true, json: async () => ({ content: text == null ? [] : [{ type: 'text', text }], stop_reason: 'end_turn' }) });
+  const goodJson = JSON.stringify({ summary: '체육대회 추가', items: [{ title: '주안이 어린이집 체육대회', kind: '일정', date: '2026-11-05', endDate: '', time: '', endTime: '' }], undated: [], deletes: [] });
+  // 1) 첫 답이 JSON이 아니면 같은 AI에게 형식만 지키라고 다시 → 성공
+  let qc = [];
+  const seqFetch = (replies) => async (url, init) => { qc.push({ url, body: JSON.parse(init.body) }); const r = replies[Math.min(qc.length - 1, replies.length - 1)]; return typeof r === 'function' ? r(url) : r; };
+  let logged = [];
+  let rr = await ai.analyzeCommand({ text: userText }, { ...cmd, fetch: seqFetch([gem('알겠습니다. 11월 5일에 추가하겠습니다.'), gem(goodJson)]), keys: { gemini: 'g' }, log: (...a) => logged.push(a.join(' ')) });
+  assert.strictEqual(qc.length, 2);
+  assert.ok(qc[1].body.contents[0].parts[0].text.includes('JSON 하나만 출력하세요') && !qc[0].body.contents[0].parts[0].text.includes('JSON 하나만 출력하세요'));
+  assert.ok(rr.items.length === 1 && rr.items[0].allDay === true && rr.items[0].time === '');
+  assert.ok(logged.some((l) => l.includes('AI 답을 읽지 못함') && l.includes('NO_JSON') && l.includes('알겠습니다')), '로그에 AI가 한 말이 남음');
+  const evNov5 = itemToEvent(rr.items[0], { source: 'ai' });
+  assert.ok(evNov5.allDay && new Date(evNov5.start).getMonth() === 10 && new Date(evNov5.start).getDate() === 5 && evNov5.title === '주안이 어린이집 체육대회');
+  // 2) 빈 답 → 다시 → 성공
+  qc = [];
+  rr = await ai.analyzeCommand({ text: userText }, { ...cmd, fetch: seqFetch([{ ok: true, json: async () => ({ candidates: [{ finishReason: 'STOP', content: { parts: [] } }] }) }, gem(goodJson)]), keys: { gemini: 'g' } });
+  assert.strictEqual(qc.length, 2); assert.strictEqual(rr.items.length, 1);
+  // 3) 같은 AI가 두 번 다 못 하면 다른 AI(키가 있을 때)로
+  qc = [];
+  rr = await ai.analyzeCommand({ text: userText }, { ...cmd, fetch: seqFetch([gem('죄송합니다'), gem('음...'), (url) => cla(goodJson)]), keys: { gemini: 'g', claude: 'c' } });
+  assert.strictEqual(qc.length, 3); assert.ok(qc[2].url.includes('anthropic')); assert.strictEqual(rr.provider, 'claude');
+  // 4) 그래도 안 되면 AI가 한 말을 보여 주는 쉬운 안내 (옛 문구가 아님)
+  qc = [];
+  await assert.rejects(ai.analyzeCommand({ text: userText }, { ...cmd, fetch: seqFetch([gem('죄송합니다. 처리할 수 없는 요청입니다.')]), keys: { gemini: 'g' } }), (e) => e.code === 'NO_JSON' && e.message.includes('AI가 보낸 말: “죄송합니다') && !e.message.includes('(JSON)를 찾지 못'));
+  assert.strictEqual(qc.length, 2, 'Claude 키가 없으면 같은 AI에게 두 번');
+  // 5) Claude가 빈 내용을 주어도 같은 방식으로 다시
+  qc = [];
+  rr = await ai.analyzeCommand({ text: userText }, { ...cmd, provider: 'claude', fetch: seqFetch([cla(null), cla(goodJson)]), keys: { claude: 'c' } });
+  assert.strictEqual(qc.length, 2); assert.strictEqual(rr.items.length, 1);
+  // 6) 키·한도 같은 오류는 다시 시도하지 않고 바로 알림
+  qc = [];
+  await assert.rejects(ai.analyzeCommand({ text: userText }, { ...cmd, fetch: seqFetch([{ ok: false, status: 401, text: async () => '{"error":{"message":"bad key"}}' }]), keys: { gemini: 'g' } }), /API 키 인증 실패/);
+  assert.strictEqual(qc.length, 1);
+  // 7) "하루종일"이라고 했는데 AI가 시각을 넣어 버려도 종일로 (종일반은 건드리지 않음)
+  rr = await ai.analyzeCommand({ text: userText }, { ...cmd, fetch: seqFetch([gem(JSON.stringify({ summary: '', items: [{ title: '주안이 어린이집 체육대회', kind: '일정', date: '2026-11-05', time: '09:00', endTime: '10:00', endDate: '' }] }))]), keys: { gemini: 'g' } });
+  assert.ok(rr.items[0].allDay === true && rr.items[0].time === '' && rr.items[0].endTime === '');
+  rr = await ai.analyzeCommand({ text: '11월 5일 종일반 상담' }, { ...cmd, fetch: seqFetch([gem(JSON.stringify({ summary: '', items: [{ title: '종일반 상담', kind: '일정', date: '2026-11-05', time: '09:00', endTime: '', endDate: '' }] }))]), keys: { gemini: 'g' } });
+  assert.strictEqual(rr.items[0].time, '09:00');
+  // 8) 요청 글에 "하루종일" 안내와 deletes 빈 배열 예시가 들어 있다
+  qc = [];
+  await ai.analyzeCommand({ text: userText }, { ...cmd, fetch: seqFetch([gem(goodJson)]), keys: { gemini: 'g' } });
+  const sentPrompt = qc[0].body.contents[0].parts[0].text;
+  assert.ok(sentPrompt.includes('"하루종일"·"종일"이라고 했으면') && sentPrompt.includes('"deletes": []') && !sentPrompt.includes('지울 일정 id"]'));
+  // 9) 파일 분석도 같은 방식으로 다시 묻는다
+  qc = [];
+  const fr = await ai.analyzeFile(fx('sample.docx'), { fetch: seqFetch([gem('음…'), gem('{"summary":"s","items":[{"title":"마감","kind":"마감","date":"2026-10-08"}]}')]), keys: { gemini: 'g' }, provider: 'gemini', geminiModel: 'gm' });
+  assert.strictEqual(qc.length, 2); assert.strictEqual(fr.items[0].title, '마감');
+  ok('JSON 아닌 답·빈 답 → 같은 AI에게 다시 → 다른 AI로, 끝내 못 읽으면 AI가 한 말을 보여 줌, 키 오류는 바로 알림, "하루종일"은 종일(종일반 제외), 파일 분석도 다시 묻기');
+
   console.log('MCP 서버 ↔ 캘린더 연결 창구');
   const apiFile = path.join(os.tmpdir(), 'api-test.json');
   const store = [];

@@ -198,7 +198,7 @@ async function claudeGenerate(fetchFn, key, model, content, onStage) {
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
       model,
-      max_tokens: 8000,
+      max_tokens: 16000, // 새 모델이 먼저 "생각"하느라 글자 수를 쓰고 답이 비는 일이 없게 넉넉히
       system: '당신은 일정 추출 비서입니다. 요청한 JSON 형식만 출력하고 다른 말은 하지 마세요.',
       messages: [{ role: 'user', content }],
     }),

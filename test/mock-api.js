@@ -18,6 +18,8 @@
     { id: '7', title: '방과후 회의', start: d(1, 16), end: d(1, 17), allDay: false, color: '', remind: [] },
     { id: '8', title: '생활기록부 마감', start: d(1, 17), end: d(1, 18), allDay: false, color: '#ffb877', remind: [] },
     { id: '9', title: '체육대회', start: d(9), end: d(9), allDay: true, color: '', remind: [] },
+    { id: 'b1', title: `📋 브리핑 ${today.getMonth() + 1}/${today.getDate()}`, start: d(0), end: d(0), allDay: true, color: '#d4b8ff', remind: [], source: 'claude-code',
+      memo: `# 📋 이음톡 브리핑\n쪽지 받음 12통 · 보냄 4통 · 일정 추가 3건\n\n## ⏰ 오늘·내일 처리할 일\n- [미처리] 출석부 제출 — 마감 내일(금) 17:00\n- [처리함] **학년 협의회 자료** — 보낸 쪽지로 회신함(어제 오후 2:12)\n\n## 📅 마이스케쥴에 넣은 일정\n- 11/12(목) 14:00 학년 협의회 (3층 회의실)\n\n## ⚠️ 직접 확인이 필요한 것\n- 날짜가 불분명한 쪽지 1통(받은 시각 어제 10:15)` },
   ];
   const external = [
     { id: 'g1', title: '치과 예약', start: d(3, 11), end: d(3, 12), allDay: false, readOnly: true, calendar: '구글 캘린더', color: '#ffd28a' },

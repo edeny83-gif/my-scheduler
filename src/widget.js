@@ -70,6 +70,7 @@ const byTime = (a, b) => (b.allDay - a.allDay) || (a.start - b.start) || a.title
 
 // ---------------- 달력 ----------------
 function render() {
+  updateBriefBadge();
   if (!settings.colors) return;
   const first = new Date(view);
   $('#month').textContent = first.getMonth() + 1;
@@ -348,7 +349,80 @@ function syncChips() {
 }
 function syncAllDay() { $('.when').classList.toggle('allday', $('#ad').checked); renderChips($('#ad').checked); }
 
+// ---------------- 브리핑 (Claude가 저장한 "📋 브리핑 M/D" 종일 일정의 메모를 읽기 좋게 보여 준다) ----------------
+const BRIEF_PREFIX = '📋 브리핑';
+const isBrief = (e) => !!e && !e.readOnly && !!e.allDay && typeof e.title === 'string' && e.title.startsWith(BRIEF_PREFIX);
+const briefings = () => events.filter(isBrief).sort((a, b) => b.start - a.start);
+let briefId = null;
+
+/** **굵게**와 [처리함]·[미처리] 같은 꼬리표를 꾸며 넣는다(글자는 textContent로만 넣어 안전하다) */
+function briefInline(el, text) {
+  for (const part of String(text).split(/(\*\*[^*]+\*\*|\[[^\]\n]{1,10}\])/)) {
+    if (!part) continue;
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) { const b = document.createElement('b'); b.textContent = part.slice(2, -2); el.append(b); }
+    else if (/^\[[^\]]+\]$/.test(part)) {
+      const t = document.createElement('span');
+      const w = part.slice(1, -1);
+      t.className = `btag ${/미처리|안 ?함|확인 ?필요|필요/.test(w) ? 'todo' : /처리함|완료|함$/.test(w) ? 'done' : ''}`;
+      t.textContent = w; el.append(t);
+    } else el.append(document.createTextNode(part));
+  }
+}
+function briefRender(text, into) {
+  into.replaceChildren();
+  let ul = null;
+  for (const raw of String(text || '').split('\n')) {
+    const line = raw.replace(/\s+$/, '');
+    const li = /^\s*[-*•]\s+(.*)$/.exec(line);
+    if (li) { if (!ul) { ul = document.createElement('ul'); into.append(ul); } const x = document.createElement('li'); briefInline(x, li[1]); ul.append(x); continue; }
+    ul = null;
+    if (!line.trim()) continue;
+    const h = /^(#{1,3})\s+(.*)$/.exec(line);
+    const el = document.createElement(h ? 'h4' : 'p');
+    if (h) el.className = `h${h[1].length}`;
+    briefInline(el, h ? h[2] : line);
+    into.append(el);
+  }
+}
+function showBrief(id) {
+  const list = briefings();
+  const cur = list.find((e) => e.id === id) || list[0] || null;
+  briefId = cur?.id ?? null;
+  const tabs = $('#briefTabs');
+  tabs.replaceChildren();
+  for (const e of list.slice(0, 14)) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = `chip${e.id === briefId ? ' on' : ''}`;
+    b.textContent = `${new Date(e.start).getMonth() + 1}/${new Date(e.start).getDate()}`;
+    b.onclick = () => showBrief(e.id);
+    tabs.append(b);
+  }
+  $('#briefEmpty').hidden = !!cur;
+  $('#briefBody').hidden = !cur;
+  $('#briefDel').hidden = !cur;
+  $('#briefDate').textContent = cur ? `${ymd(cur.start)} (${DOW[new Date(cur.start).getDay()]})` : '';
+  if (cur) briefRender(cur.memo, $('#briefBody'));
+}
+function openBrief(id) {
+  showBrief(id);
+  if (!$('#briefDlg').open) $('#briefDlg').showModal();
+  pingNow();
+}
+function updateBriefBadge() {
+  const t = sod(Date.now());
+  $('#brief').classList.toggle('has', briefings().some((e) => sod(e.start) === t));
+  if ($('#briefDlg').open) showBrief(briefId);   // 열어 둔 동안 새 브리핑이 오면 바로 갱신
+}
+$('#brief').onclick = () => openBrief(briefings().find((e) => sod(e.start) === sod(Date.now()))?.id);
+$('#briefClose').onclick = () => $('#briefDlg').close();
+$('#briefDel').onclick = async () => {
+  const cur = briefings().find((e) => e.id === briefId);
+  if (!cur || !confirm(`"${cur.title}"을(를) 지울까요?`)) return;
+  await api.deleteEvent(cur.id);
+};
+
 function openForm(item, day) {
+  if (isBrief(item)) return openBrief(item.id);   // 브리핑 일정은 편집 창 대신 읽기 좋은 브리핑 창으로
   editing = item;
   const ro = !!item?.readOnly;
   $('#f').classList.toggle('readonly', ro);
@@ -546,6 +620,7 @@ function applyDock(d, { snap } = {}) {
   $('#dockbar').hidden = dock.docked;
   // 입력 상태가 끝나는데 입력 창이 열려 있으면 닫는다 (뒤에 숨은 채 남지 않게)
   if (wasActive && !dock.active && $('#form').open) $('#form').close();
+  if (wasActive && !dock.active && $('#briefDlg').open) $('#briefDlg').close();
   if (dock.active) { $('#toast').hidden = true; b.remove('nudge'); }
   if (snap || d.snap) playSnap();
 }

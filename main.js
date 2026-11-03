@@ -7,8 +7,9 @@ const pin = require('./pin');
 const { createDock } = require('./dock');
 const ai = require('./ai');
 const { extractText } = require('./extract');
-const { itemToEvent, eventToItem, findDuplicate, parseYmd, sod } = require('./convert');
+const { itemToEvent, eventToItem, findDuplicate, parseYmd, sod, ymd } = require('./convert');
 const { startApiServer } = require('./api-server');
+const { upsertBriefing } = require('./briefing');
 const { SyncManager } = require('./sync-main');
 
 // 일부 그래픽 드라이버에서 투명 창이 불투명(검정/회색)으로 그려지는 문제를 막는다.
@@ -508,6 +509,12 @@ async function startApi() {
         const items = list.map((it) => ({ ...it, sourceNote: it.sourceNote || body.sourceNote }));
         const added = addItems(items, 'claude-code', 'Claude Code');
         return { ok: true, added: added.map(eventToItem) };
+      },
+      // 브리핑 저장: 날짜별로 하나(같은 날짜면 글만 바꿈) — 위젯의 📋 브리핑 버튼이 이 글을 보여 준다
+      'POST /briefing': ({ body }) => {
+        const date = body.date || ymd(Date.now());
+        const r = upsertBriefing(store, { date, text: body.text, title: body.title }, { itemToEvent, sod });
+        return { ok: true, created: r.created, id: r.id, title: r.title, date };
       },
       'PATCH /events/:id': ({ id, body }) => {
         const cur = store.list().find((e) => e.id === id);

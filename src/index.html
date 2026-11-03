@@ -18,6 +18,7 @@
       <button id="today">오늘</button>
       <button id="next" title="다음 달" aria-label="다음 달">›</button>
       <button id="add" title="일정 추가" aria-label="일정 추가">＋</button>
+      <button id="brief" title="📋 브리핑: Claude가 정리해 준 오늘 처리할 일" aria-label="브리핑">📋</button>
       <button id="assist" title="AI 비서: 사진·문서·녹음으로 일정 만들기" aria-label="AI 비서">✦</button>
       <button id="gear" title="설정 (누르면 설정창이 열리고 위치·크기 조정도 켜져요)" aria-label="설정">⚙</button>
     </div>
@@ -92,6 +93,21 @@
       <button type="submit" id="save" class="primary">저장</button>
     </div>
   </form>
+</dialog>
+<!-- 브리핑: Claude가 이음톡 쪽지 등을 정리해 저장한 "오늘 처리할 일" 글 -->
+<dialog id="briefDlg" class="brief">
+  <div class="form-head">
+    <h3>📋 브리핑</h3>
+    <span id="briefDate" class="source"></span>
+  </div>
+  <nav id="briefTabs" class="brief-tabs" aria-label="날짜별 브리핑"></nav>
+  <article id="briefBody" class="brief-body"></article>
+  <p id="briefEmpty" class="brief-empty" hidden>아직 브리핑이 없어요.<br>PC의 Claude에게 <b>/이음톡정리</b>라고 하면 쪽지를 정리해서 여기에 브리핑을 만들어 줘요.</p>
+  <div class="actions">
+    <button type="button" id="briefDel" class="danger">이 브리핑 지우기</button>
+    <span class="sp"></span>
+    <button type="button" id="briefClose" class="primary">닫기</button>
+  </div>
 </dialog>
 <script src="widget.js"></script>
 </body>

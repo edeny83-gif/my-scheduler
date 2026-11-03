@@ -255,3 +255,21 @@ body.dragging .drop { display: grid; }
 .sync.ok { background-color: #6fdc9a; }
 .sync.warn { background-color: #ffd28a; }
 .sync.err { background-color: #ff7b7b; }
+
+/* ---- 📋 브리핑 ---- */
+#brief { position: relative; }
+#brief.has::after { content: ''; position: absolute; top: 3px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: #d4b8ff; box-shadow: 0 0 0 2px rgba(0,0,0,.25); }
+dialog.brief { width: min(560px, 94vw); }
+.brief-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.brief-tabs:empty { display: none; }
+.brief-body { max-height: min(62vh, 520px); overflow: auto; padding: 2px 2px 2px 0; line-height: 1.6; font-size: 14px; }
+.brief-body[hidden], .brief-empty[hidden] { display: none; }
+.brief-body h4 { margin: 14px 0 4px; font-size: 14px; color: #d4b8ff; }
+.brief-body h4.h1 { margin-top: 0; font-size: 16px; color: #eef3f9; }
+.brief-body p { margin: 4px 0; }
+.brief-body ul { margin: 2px 0 6px; padding-left: 1.15em; }
+.brief-body li { margin: 2px 0; }
+.btag { display: inline-block; font-size: 11px; font-weight: 700; padding: 0 6px; margin-right: 4px; border-radius: 999px; background: #3a4758; color: #d7dfea; vertical-align: 1px; }
+.btag.todo { background: #ff9e9e; color: #2a1215; }
+.btag.done { background: #a8f0b8; color: #11301a; }
+.brief-empty { margin: 10px 0; opacity: .8; line-height: 1.6; }

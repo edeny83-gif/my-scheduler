@@ -19,6 +19,9 @@ const INSTRUCTIONS = `MyScheduler는 사용자의 Windows 바탕화면 캘린더
 5. 제목은 20자 이내로 구체적으로, 준비물·대상·제출처 같은 세부는 memo에. 원문 근거는 evidence에.
 6. 넣은 뒤 무엇을 추가했는지 짧게 보고한다. 캘린더 앱이 Windows 알림으로도 알려준다.
 
+브리핑: 쪽지·문서를 정리해 "오늘 처리할 일" 글을 만들었다면 briefing_save로 마이스케쥴에 저장한다(날짜별 하나, 같은 날짜면 글만 바뀜).
+사용자는 위젯의 📋 브리핑 버튼으로 읽는다. 브리핑 글에는 이름·전화번호를 쓰지 않는다.
+
 알림(remind, 분 단위 배열): 시간이 있는 일정은 시작 전 분(예: [30]).
 종일 일정은 그날 00:00 기준이라 -480 = 당일 오전 8시, 900 = 전날 오전 9시. 생략하면 적절한 기본값이 들어간다.`;
 
@@ -104,6 +107,20 @@ const TOOLS = [
       required: ['paths'],
     },
     run: (a) => call('POST', '/analyze', a),
+  },
+  {
+    name: 'briefing_save',
+    description: '브리핑 글(마크다운)을 마이스케쥴에 저장합니다. 날짜별로 하나이고, 같은 날짜가 있으면 글만 바뀝니다. 사용자는 위젯·폰의 📋 브리핑 버튼으로 읽습니다(그 날짜의 종일 일정 "📋 브리핑 M/D"로도 보입니다).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: '브리핑 날짜 YYYY-MM-DD (보통 오늘)' },
+        text: { type: 'string', description: '브리핑 글. 마크다운 가능(# 제목, - 목록). 개인정보 없이.' },
+        title: { type: 'string', description: '제목(선택). 비우면 "📋 브리핑 M/D"' },
+      },
+      required: ['date', 'text'],
+    },
+    run: (a) => call('POST', '/briefing', a),
   },
   {
     name: 'calendar_notify',

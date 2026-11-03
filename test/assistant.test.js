@@ -252,6 +252,7 @@ const ok = (m) => console.log('  ✓', m);
       'GET /events': () => ({ count: store.length, events: store }),
       'POST /events': ({ body }) => { const added = body.events.map((e, i) => ({ id: String(i), ...e })); store.push(...added); return { ok: true, added }; },
       'POST /extract': ({ body }) => ({ text: extractText(body.path).text.slice(0, 20) }),
+      'POST /briefing': ({ body }) => ({ ok: true, created: true, title: `📋 브리핑 ${body.date}`, echoed: body.text }),
     },
   });
   const mcp = spawn(process.execPath, [path.join(__dirname, '..', 'tools', 'mcp-server.js')], { env: { ...process.env, MYSCHEDULER_API_FILE: apiFile } });
@@ -273,7 +274,10 @@ const ok = (m) => console.log('  ✓', m);
   mcp.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
   rpc(2, 'tools/list', {});
   const tools = (await waitFor(2)).result.tools.map((t) => t.name);
-  assert.deepStrictEqual(tools, ['calendar_list_events', 'calendar_add_events', 'calendar_update_event', 'calendar_delete_event', 'document_extract_text', 'audio_transcribe', 'files_analyze_with_app_ai', 'calendar_notify']);
+  assert.deepStrictEqual(tools, ['calendar_list_events', 'calendar_add_events', 'calendar_update_event', 'calendar_delete_event', 'document_extract_text', 'audio_transcribe', 'files_analyze_with_app_ai', 'briefing_save', 'calendar_notify']);
+  rpc(31, 'tools/call', { name: 'briefing_save', arguments: { date: '2026-11-03', text: '# 오늘\n- 출석부 제출' } });
+  const br = await waitFor(31);
+  assert.ok(!br.result.isError && br.result.content[0].text.includes('📋 브리핑 2026-11-03') && br.result.content[0].text.includes('출석부 제출'), 'briefing_save → /briefing 로 전달');
   rpc(3, 'tools/call', { name: 'calendar_add_events', arguments: { events: [{ title: '체육대회', date: '2026-10-09' }] } });
   const add = await waitFor(3);
   assert.ok(add.result.content[0].text.includes('체육대회') && !add.result.isError);

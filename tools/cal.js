@@ -7,6 +7,7 @@
 //   node cal.js extract <파일경로>        (HWP·HWPX·DOCX 글자 추출)
 //   node cal.js transcribe <녹음파일>     (Gemini 키 필요)
 //   node cal.js analyze <파일...> [--add] [--instruction "..."]
+//   node cal.js briefing 2026-11-03 "브리핑 글"   (날짜별 하나, 같은 날짜면 글만 바뀜)
 //   node cal.js notify "제목" "내용"
 const { call } = require('./client');
 
@@ -24,9 +25,10 @@ const plain = args.filter((a, i) => !a.startsWith('--') && !(i > 0 && args[i - 1
     case 'extract': r = await call('POST', '/extract', { path: plain[0] }); break;
     case 'transcribe': r = await call('POST', '/transcribe', { path: plain[0] }); break;
     case 'analyze': r = await call('POST', '/analyze', { paths: plain, add: args.includes('--add'), instruction: flag('instruction') }); break;
+    case 'briefing': r = await call('POST', '/briefing', { date: plain[0], text: plain.slice(1).join(' ') }); break;
     case 'notify': r = await call('POST', '/notify', { title: plain[0], message: plain[1] || '' }); break;
     default:
-      console.error('명령: list | add | update | delete | extract | transcribe | analyze | notify');
+      console.error('명령: list | add | update | delete | extract | transcribe | analyze | briefing | notify');
       process.exit(1);
   }
   console.log(typeof r.text === 'string' ? r.text : JSON.stringify(r, null, 2));
